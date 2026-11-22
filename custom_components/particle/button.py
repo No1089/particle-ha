@@ -1,6 +1,8 @@
 """A button per cloud function (called with an empty argument).
 
-For arguments use the particle.call_function action.
+Disabled by default: many functions need an argument, and an empty one can do the
+wrong thing (e.g. brightness("") -> 0). Enable the ones that make sense; for
+arguments use the particle.call_function action.
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ class ParticleFunctionButton(ParticleEntity, ButtonEntity):
         self._function = function
         self._attr_name = function
         self._attr_icon = "mdi:function-variant"
+        self._attr_entity_registry_enabled_default = False
 
     @property
     def available(self) -> bool:
