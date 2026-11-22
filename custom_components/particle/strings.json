@@ -61,7 +61,7 @@
       },
       "devices": {
         "title": "Devices in {product}",
-        "description": "Pick the devices Home Assistant should see. Cloud variables are read every poll interval (a cloud round trip each, which uses data on cellular devices); prefer `ha/<key>` events for live values.",
+        "description": "Pick the devices Home Assistant should see. Cloud variables are read every poll interval (a cloud round trip each, which uses data on cellular devices); prefer `ha/` events for live values.",
         "data": {
           "devices": "Devices",
           "poll_interval": "Variable poll interval"
