@@ -55,6 +55,11 @@ def is_product_device(d: dict) -> bool:
     return bool(d.get("product_id")) and d.get("product_id") != d.get("platform_id")
 
 
+def compatible(product: dict, device: dict) -> bool:
+    """A device can only be in a product of its own platform."""
+    return product.get("platform_id") is not None and product.get("platform_id") == device.get("platform_id")
+
+
 def api_user_name(hass) -> str:
     return f"Home Assistant ({hass.config.location_name or 'home'})"[:60]
 
@@ -198,7 +203,9 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
         dev = self._device
         platform = dev["platform_id"]
         current = self._current
-        same = [p for p in self._products if p.get("platform_id") == platform
+        # Only products of the device's own platform: Particle rejects others on import,
+        # and product firmware is built per platform.
+        same = [p for p in self._products if compatible(p, dev)
                 and not (current and p["id"] == current["id"])]
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -216,6 +223,9 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
                     self._products.append(self._product)
                 else:
                     self._product = next(p for p in same if str(p["id"]) == choice)
+                if not compatible(self._product, dev):  # never move to a mismatched product
+                    errors["base"] = "incompatible_product"
+                    raise _Retry
                 pid = self._product["id"]
                 if current:  # move: a device is in one product at a time
                     await self._account.remove_from_product(current["id"], dev["id"])
