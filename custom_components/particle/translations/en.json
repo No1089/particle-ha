@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Particle account",
+        "description": "Paste a Particle access token. Create one that doesn't expire with `particle token create --never-expires` (Particle CLI). Events arrive live from the Particle Cloud event stream, so Home Assistant needs no public URL.",
+        "data": {"access_token": "Access token"}
+      },
+      "devices": {
+        "title": "Devices",
+        "description": "The account has {count} devices. Pick the ones Home Assistant should see. Cloud variables are read every poll interval (a cloud round trip each, which uses data on cellular devices); prefer `ha/<key>` events for live values.",
+        "data": {"devices": "Devices", "poll_interval": "Variable poll interval"}
+      },
+      "reauth_confirm": {
+        "title": "New Particle token",
+        "description": "Particle rejected the token. Paste a new one for the same account.",
+        "data": {"access_token": "Access token"}
+      }
+    },
+    "error": {
+      "invalid_auth": "Particle rejected the token.",
+      "cannot_connect": "Couldn't reach the Particle Cloud."
+    },
+    "abort": {
+      "already_configured": "This Particle account is already set up.",
+      "reauth_successful": "Token updated.",
+      "wrong_account": "That token belongs to a different Particle account."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Particle devices",
+        "data": {"devices": "Devices", "poll_interval": "Variable poll interval"}
+      }
+    },
+    "abort": {"cannot_connect": "Couldn't reach the Particle Cloud."}
+  },
+  "issues": {
+    "stream_down": {
+      "title": "Particle event stream down",
+      "description": "Home Assistant hasn't had a working Particle event stream for over {minutes} minutes, so device events and `ha/` sensors aren't updating. It keeps reconnecting by itself. Last error: {error}"
+    }
+  },
+  "services": {
+    "call_function": {
+      "name": "Call function",
+      "description": "Call a cloud function on a Particle device. Returns its integer return value.",
+      "fields": {
+        "device_id": {"name": "Device", "description": "The Particle device."},
+        "function": {"name": "Function", "description": "Cloud function name."},
+        "argument": {"name": "Argument", "description": "String argument (max 1024 bytes)."}
+      }
+    },
+    "publish_event": {
+      "name": "Publish event",
+      "description": "Publish a private event that the account's devices can subscribe to with Particle.subscribe().",
+      "fields": {
+        "name": {"name": "Name", "description": "Event name."},
+        "data": {"name": "Data", "description": "Event data (max 1024 bytes)."},
+        "ttl": {"name": "TTL", "description": "Time to live in seconds."}
+      }
+    }
+  }
+}

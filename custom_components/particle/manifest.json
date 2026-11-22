@@ -1,0 +1,10 @@
+{
+  "domain": "particle",
+  "name": "Particle",
+  "codeowners": ["@No1089"],
+  "config_flow": true,
+  "documentation": "https://github.com/No1089/particle-ha",
+  "iot_class": "cloud_push",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,34 @@
+call_function:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: particle
+    function:
+      required: true
+      example: "led"
+      selector:
+        text:
+    argument:
+      example: "on"
+      selector:
+        text:
+publish_event:
+  fields:
+    name:
+      required: true
+      example: "home/mode"
+      selector:
+        text:
+    data:
+      example: "away"
+      selector:
+        text:
+    ttl:
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 16777215
+          mode: box
