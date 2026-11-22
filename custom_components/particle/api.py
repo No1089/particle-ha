@@ -19,9 +19,16 @@ class ParticleError(Exception):
 
 
 class ParticleClient:
-    def __init__(self, session: aiohttp.ClientSession, token: str) -> None:
+    """Runtime client. With `product`, every call goes through the product endpoints,
+    which is all a product API user token may use; without it, the account ones
+    (legacy setup with a full account token)."""
+
+    def __init__(self, session: aiohttp.ClientSession, token: str, product: int | None = None) -> None:
         self._session = session
         self._headers = {"Authorization": f"Bearer {token}"}
+        self.product = product
+        self._dev = f"/products/{product}/devices" if product else "/devices"
+        self._events = f"/products/{product}/events" if product else "/devices/events"
 
     async def _request(self, method: str, path: str, data: dict | None = None) -> Any:
         try:
@@ -43,21 +50,32 @@ class ParticleClient:
         return await self._request("GET", "/user")
 
     async def devices(self) -> list[dict]:
-        return await self._request("GET", "/devices")
+        if not self.product:
+            return await self._request("GET", "/devices")
+        out: list[dict] = []
+        page = 1
+        while True:
+            body = await self._request("GET", f"{self._dev}?perPage=100&page={page}")
+            out += body.get("devices", [])
+            if page >= (body.get("meta") or {}).get("total_pages", 1):
+                return out
+            page += 1
 
     async def device(self, device_id: str) -> dict:
-        return await self._request("GET", f"/devices/{device_id}")
+        return await self._request("GET", f"{self._dev}/{device_id}")
 
     async def variable(self, device_id: str, name: str) -> Any:
-        return (await self._request("GET", f"/devices/{device_id}/{name}"))["result"]
+        return (await self._request("GET", f"{self._dev}/{device_id}/{name}"))["result"]
 
     async def call(self, device_id: str, name: str, arg: str = "") -> int:
-        res = await self._request("POST", f"/devices/{device_id}/{name}", {"arg": arg})
+        res = await self._request("POST", f"{self._dev}/{device_id}/{name}", {"arg": arg})
         return res.get("return_value")
 
     async def publish(self, name: str, data: str = "", private: bool = True, ttl: int = 60) -> None:
-        await self._request("POST", "/devices/events",
-                            {"name": name, "data": data, "private": str(private).lower(), "ttl": ttl})
+        body = {"name": name, "data": data, "ttl": ttl}
+        if not self.product:
+            body["private"] = str(private).lower()
+        await self._request("POST", self._events, body)
 
     async def events(self) -> AsyncIterator[tuple[str, dict]]:
         """Yield (event name, payload) from the SSE stream of all the account's devices.
@@ -68,7 +86,7 @@ class ParticleClient:
         events; the caller detects that with a canary event (see probe()).
         """
         async with self._session.get(
-            f"{API}/devices/events", headers=self._headers,
+            f"{API}{self._events}", headers=self._headers,
             timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60),
         ) as resp:
             if resp.status == 401:

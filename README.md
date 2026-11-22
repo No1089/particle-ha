@@ -97,7 +97,6 @@ Call `HA.begin()` in `setup()` to answer `hass-sync`. Each value goes out as pri
 1. Copy `custom_components/particle` to `/config/custom_components/` (or add the repo to HACS as a
    custom repository) and restart HA.
 2. *Settings → Devices & services → Add integration → Particle*.
-3. Paste a token: `particle token create --never-expires`. Pick devices and a poll interval.
 
 Updating: copy the folder again and restart HA (a reload doesn't load new code). From this repo:
 
@@ -106,11 +105,45 @@ tar -C custom_components --exclude=__pycache__ -cf - particle | ssh root@<ha-hos
 ssh root@<ha-host> 'ha core check && ha core restart'
 ```
 
+## Setup and access
+
+Home Assistant never keeps your Particle login. The setup flow:
+
+1. **Log in** with your Particle email and password, plus the code from your authenticator if MFA
+   is on (`grant_type=urn:custom:mfa-otp`). SSO accounts aren't supported. The login token lives
+   an hour at most and is deleted at the end of the flow.
+2. **Pick a device.** A device in a product uses that product. A sandbox device gets a product
+   in the next step: an existing one for its platform, or a new one, and the device is imported.
+   If the product has released firmware (a default or a group release), the device is marked as
+   a development device, so that firmware won't replace the device's own.
+3. **API user.** The flow creates an API user on the product, named "Home Assistant (<your home's
+   name>)", with only these scopes: `devices:list`, `devices:get`, `devices.variable:get`,
+   `devices.function:call`, `events:get`, `events:send`. Its token is the only one HA stores, and
+   everything runs through the product endpoints (`/v1/products/:id/...`). It can't flash, claim,
+   or reach anything outside that product.
+
+One config entry per product. Setting up a device from a product that's already set up just adds
+it to that entry.
+
+- **Configure → Devices**: pick more of the product's devices, set the variable poll interval.
+- **Configure → Revoke access**: log in, and the API user is deleted from the product (Particle
+  doesn't let an API user delete itself or revoke its own token, so this needs an owner login). The
+  entry and its entities stay; HA then asks to re-authenticate.
+- **Re-authenticate** (offered when the token stops working, or after Revoke): log in, and a new API
+  user replaces the old one.
+- **Reconfigure** switches an entry to another device/product or from an old account token to a
+  product API user, in place: entity IDs, HomeKit and history are kept, and the old API user is
+  deleted.
+- **Removing the integration** can't delete the API user (no login at that point), so HA shows a
+  notification naming it with a link to the product's Team page. Use Revoke first.
+
+Entries made before this flow use a full account token. They keep working; *Reconfigure* moves
+them to a product API user.
+
 ## Adding devices
 
-*Settings → Devices & services → Particle → Configure*: tick devices in the list (all the account's
-devices, online first) and set the poll interval. The integration reloads by itself. A second Particle
-account is *Add entry* on the same page. Function buttons are created disabled (an empty argument can
+*Configure → Devices* lists the product's devices; for a device in another product (or a sandbox
+device), use *Add entry*, which runs the setup flow above. Function buttons are created disabled (an empty argument can
 misfire, e.g. `brightness("")` = 0); enable the ones that make sense.
 
 ## Logo
@@ -139,3 +172,12 @@ event stream health + canary. Lights: Snowflake P2 (Device OS 5.6.0): effect, br
 from HA all matched the device's own variables; state arrives on boot and on `hass-sync`. Pattern
 select: picking a pattern switches the device and the light's effect follows. Brand icon served by HA. Failure modes (zombie stream, dead socket, long outage → Repairs
 issue, revoked token) are covered by the unit tests only.
+
+Setup flow (2026-11-22, throwaway HA, login stood in for by a test shim with an owner token):
+reconfigure from an account token to product P2_test in place (entities kept), wrong password and
+wrong/right MFA code, device list, product device list under Configure, Revoke (API user deleted from
+the product), re-authenticate (new API user), the product endpoints for an API user (device list/info,
+variable, function, product SSE with canary echo, product publish reaching a device's subscribe).
+Checked by hand against the API: an API user can't delete itself or revoke its own token; deleting it
+kills its token at once. Not run yet: a real password/MFA login, the product step for a sandbox device
+(import, new product, development flag), adding a device to an already set up product.

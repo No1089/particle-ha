@@ -4,6 +4,16 @@ DOMAIN = "particle"
 API = "https://api.particle.io/v1"
 
 CONF_DEVICES = "devices"
+CONF_PRODUCT_ID = "product_id"
+CONF_PRODUCT_NAME = "product_name"
+CONF_PRODUCT_SLUG = "product_slug"
+CONF_API_USER = "api_user"  # API user's username, needed to delete it on revoke
+
+PLATFORM_NAMES = {
+    0: "Core", 6: "Photon", 8: "P1", 10: "Electron", 12: "Argon", 13: "Boron",
+    14: "Xenon", 22: "A SoM", 23: "B SoM", 25: "B5 SoM", 26: "Tracker",
+    28: "Tracker M", 32: "P2 / Photon 2", 35: "M-SoM",
+}
 CONF_POLL_INTERVAL = "poll_interval"
 DEFAULT_POLL_INTERVAL = 300  # s; each variable read is a cloud round trip (data on cellular)
 

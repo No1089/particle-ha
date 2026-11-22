@@ -32,7 +32,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .stream import EventStream
 from .api import ParticleAuthError, ParticleClient, ParticleError
-from .const import (BUS_EVENT, CONF_DEVICES, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL,
+from .const import (BUS_EVENT, CONF_API_USER, CONF_DEVICES, CONF_PRODUCT_ID, CONF_PRODUCT_NAME,
+                    CONF_PRODUCT_SLUG, PLATFORM_NAMES, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL,
                     DOMAIN, HA_PREFIX, SIGNAL_HA_VALUE, SIGNAL_LIGHT, STORE_VERSION,
                     SYNC_EVENT)
 
@@ -40,11 +41,6 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.LIGHT, Platform.SELECT, Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-PLATFORM_NAMES = {
-    0: "Core", 6: "Photon", 8: "P1", 10: "Electron", 12: "Argon", 13: "Boron",
-    14: "Xenon", 22: "A SoM", 23: "B SoM", 25: "B5 SoM", 26: "Tracker",
-    28: "Tracker M", 32: "P2 / Photon 2", 35: "M-SoM",
-}
 
 
 @dataclass
@@ -84,7 +80,10 @@ def parse_ha_payload(raw: str | None) -> tuple[Any, dict]:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> bool:
-    client = ParticleClient(async_get_clientsession(hass), entry.data[CONF_ACCESS_TOKEN])
+    token = entry.data.get(CONF_ACCESS_TOKEN)
+    if not token:  # revoked from the options flow
+        raise ConfigEntryAuthFailed("Particle access was revoked; re-authenticate to create a new API user")
+    client = ParticleClient(async_get_clientsession(hass), token, entry.data.get(CONF_PRODUCT_ID))
     device_ids: list[str] = entry.options.get(CONF_DEVICES, entry.data.get(CONF_DEVICES, []))
     interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
 
@@ -142,9 +141,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> 
     devreg.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, f"account_{entry.entry_id}")},
-        manufacturer="Particle", name="Particle Cloud", model=entry.title,
+        manufacturer="Particle", name="Particle Cloud",
+        model=(f"Product {entry.data[CONF_PRODUCT_ID]}, API user" if entry.data.get(CONF_PRODUCT_ID)
+               else "Account token"),
         entry_type=dr.DeviceEntryType.SERVICE,
-        configuration_url="https://console.particle.io",
+        configuration_url=_console_url(entry),
     )
     for did, d in coordinator.data.items():
         info = d["info"]
@@ -232,6 +233,29 @@ def _handle_event(hass: HomeAssistant, entry: ParticleConfigEntry, did: str,
             data.store.async_delay_save(lambda: data.ha_keys, 5)
         async_dispatcher_send(hass, SIGNAL_HA_VALUE.format(entry_id=entry.entry_id),
                               did, key, value, meta)
+
+
+def _console_url(entry: ConfigEntry) -> str:
+    slug = entry.data.get(CONF_PRODUCT_SLUG) or entry.data.get(CONF_PRODUCT_ID)
+    return f"https://console.particle.io/{slug}/team" if slug else "https://console.particle.io"
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Removing the entry can't delete the API user (that needs an owner login, see the
+    Revoke option), so say where it is."""
+    user = entry.data.get(CONF_API_USER)
+    if not (user and entry.data.get(CONF_ACCESS_TOKEN)):
+        return
+    from homeassistant.components import persistent_notification
+    persistent_notification.async_create(
+        hass,
+        f"The Particle integration for **{entry.data.get(CONF_PRODUCT_NAME)}** was removed, but its API "
+        f"user `{user}` still exists and its token stays valid. Delete it under "
+        f"[Team]({_console_url(entry)}) in the Particle console (look for \"Home Assistant\"). "
+        "Next time, use *Configure → Revoke* before removing.",
+        title="Particle API user left behind",
+        notification_id=f"particle_api_user_{entry.entry_id}",
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> bool:

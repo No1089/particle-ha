@@ -1,40 +1,98 @@
 {
   "config": {
     "step": {
-      "user": {
-        "title": "Particle account",
-        "description": "Paste a Particle access token. Create one that doesn't expire with `particle token create --never-expires` (Particle CLI). Events arrive live from the Particle Cloud event stream, so Home Assistant needs no public URL.",
-        "data": {"access_token": "Access token"}
+      "login": {
+        "title": "Log in to Particle",
+        "description": "{why}\n\nYour Particle login is only used during this setup: Home Assistant creates an API user limited to one product (list devices, read variables, call functions, read and publish events) and stores only that user's token. The login token is deleted at the end.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
       },
-      "devices": {
-        "title": "Devices",
-        "description": "The account has {count} devices. Pick the ones Home Assistant should see. Cloud variables are read every poll interval (a cloud round trip each, which uses data on cellular devices); prefer `ha/<key>` events for live values.",
-        "data": {"devices": "Devices", "poll_interval": "Variable poll interval"}
+      "mfa": {
+        "title": "Two-step verification",
+        "description": "Enter the code from your authenticator app.",
+        "data": {
+          "otp": "Code"
+        }
       },
-      "reauth_confirm": {
-        "title": "New Particle token",
-        "description": "Particle rejected the token. Paste a new one for the same account.",
-        "data": {"access_token": "Access token"}
+      "device": {
+        "title": "Device",
+        "description": "Pick a device ({count} on the account). Devices in a product use that product; sandbox devices get put in one in the next step. More devices of the same product can be added later under Configure.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "product": {
+        "title": "Product for {device}",
+        "description": "Home Assistant's API user is scoped to a product, so {device} needs one. Pick a {platform} product or create a new one; the device is added to it. If the product has released firmware, the device is marked as a development device so that firmware won't replace yours.\n\n{error}",
+        "data": {
+          "product": "Product",
+          "name": "Name for a new product"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Particle rejected the token.",
-      "cannot_connect": "Couldn't reach the Particle Cloud."
+      "invalid_auth": "Particle didn't accept that email and password.",
+      "invalid_otp": "That code didn't work. Codes change every 30 s; try the current one.",
+      "cannot_connect": "Couldn't reach the Particle Cloud.",
+      "not_product_admin": "That device is in a product you can't manage with this login. Pick another device.",
+      "product_failed": "Particle refused the product step (see below).",
+      "name_required": "Give the new product a name."
     },
     "abort": {
-      "already_configured": "This Particle account is already set up.",
-      "reauth_successful": "Token updated.",
-      "wrong_account": "That token belongs to a different Particle account."
+      "already_configured": "This product is already set up and already has this device.",
+      "device_added": "This product was already set up; the device has been added to it.",
+      "api_user_failed": "Particle refused to create the API user.",
+      "cannot_connect": "Couldn't reach the Particle Cloud.",
+      "reauth_successful": "New API user created; the old one was deleted.",
+      "reconfigure_successful": "Switched to the new API user; the old access was removed."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Particle devices",
-        "data": {"devices": "Devices", "poll_interval": "Variable poll interval"}
+        "title": "Particle",
+        "menu_options": {
+          "devices": "Devices",
+          "revoke": "Revoke access"
+        }
+      },
+      "devices": {
+        "title": "Devices in {product}",
+        "description": "Pick the devices Home Assistant should see. Cloud variables are read every poll interval (a cloud round trip each, which uses data on cellular devices); prefer `ha/<key>` events for live values.",
+        "data": {
+          "devices": "Devices",
+          "poll_interval": "Variable poll interval"
+        }
+      },
+      "login": {
+        "title": "Revoke Particle access",
+        "description": "{why}\n\nThe entry and its entities stay; it will ask to re-authenticate.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "mfa": {
+        "title": "Two-step verification",
+        "description": "Enter the code from your authenticator app.",
+        "data": {
+          "otp": "Code"
+        }
       }
     },
-    "abort": {"cannot_connect": "Couldn't reach the Particle Cloud."}
+    "error": {
+      "invalid_auth": "Particle didn't accept that email and password.",
+      "invalid_otp": "That code didn't work. Codes change every 30 s; try the current one.",
+      "cannot_connect": "Couldn't reach the Particle Cloud."
+    },
+    "abort": {
+      "cannot_connect": "Couldn't reach the Particle Cloud.",
+      "invalid_auth": "The API user's token was rejected. Re-authenticate the integration.",
+      "revoke_failed": "Particle refused to delete the API user; check the product's Team page.",
+      "revoked": "API user deleted. The integration now waits for re-authentication (Reconfigure or the re-authenticate prompt)."
+    }
   },
   "issues": {
     "stream_down": {
@@ -47,18 +105,36 @@
       "name": "Call function",
       "description": "Call a cloud function on a Particle device. Returns its integer return value.",
       "fields": {
-        "device_id": {"name": "Device", "description": "The Particle device."},
-        "function": {"name": "Function", "description": "Cloud function name."},
-        "argument": {"name": "Argument", "description": "String argument (max 1024 bytes)."}
+        "device_id": {
+          "name": "Device",
+          "description": "The Particle device."
+        },
+        "function": {
+          "name": "Function",
+          "description": "Cloud function name."
+        },
+        "argument": {
+          "name": "Argument",
+          "description": "String argument (max 1024 bytes)."
+        }
       }
     },
     "publish_event": {
       "name": "Publish event",
       "description": "Publish a private event that the account's devices can subscribe to with Particle.subscribe().",
       "fields": {
-        "name": {"name": "Name", "description": "Event name."},
-        "data": {"name": "Data", "description": "Event data (max 1024 bytes)."},
-        "ttl": {"name": "TTL", "description": "Time to live in seconds."}
+        "name": {
+          "name": "Name",
+          "description": "Event name."
+        },
+        "data": {
+          "name": "Data",
+          "description": "Event data (max 1024 bytes)."
+        },
+        "ttl": {
+          "name": "TTL",
+          "description": "Time to live in seconds."
+        }
       }
     }
   }
