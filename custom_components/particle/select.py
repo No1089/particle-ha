@@ -59,6 +59,8 @@ class ParticlePattern(SelectEntity, RestoreEntity):
         sub = "" if key == "light" else key.split("/", 1)[1].replace("_", " ").capitalize() + " "
         self._attr_name = f"{sub}Pattern".strip()
         self._fn = dict(DEFAULT_FN)
+        self._key = key
+        self._cmd: str | None = None
         self._attr_options = []
         self._attr_current_option = None
         self.apply(state, write=False)
@@ -66,6 +68,10 @@ class ParticlePattern(SelectEntity, RestoreEntity):
     @callback
     def apply(self, s: dict, write: bool) -> None:
         self._fn.update(s.get("fn") or {})
+        if s.get("cmd"):
+            self._cmd = s["cmd"]
+        if s.get("n") and self._key != "light":
+            self._attr_name = f"{s['n']} pattern"
         if s.get("fxs"):
             self._attr_options = list(s["fxs"])
         fx = s.get("fx")
@@ -77,7 +83,10 @@ class ParticlePattern(SelectEntity, RestoreEntity):
 
     async def async_select_option(self, option: str) -> None:
         try:
-            rv = await self._client.call(self.device_id, self._fn["fx"], option)
+            if self._cmd:
+                rv = await self._client.call(self.device_id, self._cmd, f"{self._key}/fx={option}")
+            else:
+                rv = await self._client.call(self.device_id, self._fn["fx"], option)
         except ParticleError as err:
             raise HomeAssistantError(str(err)) from err
         if rv is not None and rv < 0:

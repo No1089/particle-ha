@@ -1,4 +1,4 @@
 build/
 __pycache__/
 *.pyc
-firmware/examples/*/src/HomeAssistant.h
+firmware/apps/*/src/HomeAssistant.h

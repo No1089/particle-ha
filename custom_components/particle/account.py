@@ -11,13 +11,16 @@ from __future__ import annotations
 
 from typing import Any
 
+import base64
+
 import aiohttp
 
 from .api import ParticleAuthError, ParticleError
 from .const import API
 
 OAUTH = "https://api.particle.io/oauth/token"
-CLIENT = aiohttp.BasicAuth("particle", "particle")
+# OAuth client: Particle accepts any id; "particle:particle" is what its docs suggest.
+CLIENT_AUTH = {"Authorization": "Basic " + base64.b64encode(b"particle:particle").decode()}
 LOGIN_TTL = 3600  # s; the token is deleted at the end of the flow anyway
 
 # Exactly what the integration calls, nothing more.
@@ -53,7 +56,7 @@ async def login_otp(session: aiohttp.ClientSession, mfa_token: str, otp: str) ->
 
 async def _token(session: aiohttp.ClientSession, form: dict) -> str:
     try:
-        async with session.post(OAUTH, data=form, auth=CLIENT,
+        async with session.post(OAUTH, data=form, headers=CLIENT_AUTH,
                                 timeout=aiohttp.ClientTimeout(total=30)) as resp:
             body = await resp.json(content_type=None) or {}
     except (aiohttp.ClientError, TimeoutError) as err:

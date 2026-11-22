@@ -4,8 +4,9 @@
 // as a light: on/off, brightness, colour, and the effects below. The effects also
 // appear as a "Pattern" select, which HomeKit (via HA's HomeKit bridge) can use.
 //
-// Everything Home Assistant needs is in HomeAssistant.h: HA.light() registers the
-// cloud functions mode / brightness / color and publishes the state as `ha/light`.
+// Everything Home Assistant needs is in HomeAssistant.h: HA.addLight() declares the
+// light, HA.begin() registers the "ha" command function, and the state is published
+// as `ha/light/led` after every change.
 // Swap applyLight()/animate() for your own LEDs (a NeoPixel strip, a PWM channel)
 // and the Home Assistant side stays the same.
 //
@@ -21,8 +22,8 @@ SerialLogHandler logHandler(LOG_LEVEL_INFO);
 static const char *const EFFECTS[] = {"solid", "breathe", "rainbow", "blink"};
 enum { SOLID, BREATHE, RAINBOW, BLINK };
 
-static void applyLight(const HALight &l) {
-    Log.info("light: %s, brightness %u, colour %06lx, effect %s", l.on ? "on" : "off",
+static void applyLight(const char *key, const HALight &l) {
+    Log.info("%s: %s, brightness %u, colour %06lx, effect %s", key, l.on ? "on" : "off",
              l.brightness, (unsigned long)l.rgb, EFFECTS[l.effect]);
     // animate() draws every frame; nothing else to do here. A light that only changes
     // on command (no effects) would set its outputs right here instead.
@@ -35,7 +36,7 @@ static void colourWheel(uint8_t pos, uint8_t &r, uint8_t &g, uint8_t &b) {
 }
 
 static void animate() {
-    const HALight &l = HA.state();
+    const HALight &l = *HA.light("led");
     uint8_t r = l.rgb >> 16, g = l.rgb >> 8, b = l.rgb, level = l.brightness;
     uint32_t t = millis();
     if (!l.on) {
@@ -56,8 +57,8 @@ static void animate() {
 
 void setup() {
     RGB.control(true);
-    HA.light(EFFECTS, sizeof(EFFECTS) / sizeof(EFFECTS[0]), applyLight);
-    HA.state().rgb = 0xFF8C32;  // warm white to start with
+    HALight *led = HA.addLight("led", "LED", EFFECTS, sizeof(EFFECTS) / sizeof(EFFECTS[0]), applyLight);
+    led->rgb = 0xFF8C32;  // warm white to start with
     HA.begin();                 // answer hass-sync (resend the state when HA reconnects)
 }
 
@@ -67,5 +68,5 @@ void loop() {
         last = millis();
         animate();
     }
-    HA.loop();  // publishes ha/light after changes, within Particle's 1/s publish limit
+    HA.loop();  // publishes the state after changes, within Particle's 1/s publish limit
 }

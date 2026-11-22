@@ -1,6 +1,6 @@
 """Failure-mode tests for the supervised event stream, against a fake Particle client.
 
-Run: <venv with homeassistant>/bin/python -m pytest tests/  (or run this file directly)
+Run directly (not via pytest: it swaps module globals for its fake): python tests/check_stream.py
 """
 import asyncio
 import importlib

@@ -35,7 +35,11 @@ void loop() {
         last = millis();
         counter++;
         HA.value("uptime", (int)(millis() / 1000), "s", "duration", "total_increasing");
-        HA.value("rssi", WiFi.RSSI().getStrength(), "%", nullptr, "measurement");
+#if Wiring_WiFi
+        HA.value("wifi_signal", WiFi.RSSI().getStrength(), "%", nullptr, "measurement");
+#elif Wiring_Cellular
+        HA.value("cell_signal", Cellular.RSSI().getStrength(), "%", nullptr, "measurement");
+#endif
     }
     HA.loop();  // sends queued ha/<key> events at Particle's 1/s limit
 }

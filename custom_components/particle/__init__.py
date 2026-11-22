@@ -34,11 +34,12 @@ from .stream import EventStream
 from .api import ParticleAuthError, ParticleClient, ParticleError
 from .const import (BUS_EVENT, CONF_API_USER, CONF_DEVICES, CONF_PRODUCT_ID, CONF_PRODUCT_NAME,
                     CONF_PRODUCT_SLUG, PLATFORM_NAMES, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL,
-                    DOMAIN, HA_PREFIX, SIGNAL_HA_VALUE, SIGNAL_LIGHT, STORE_VERSION,
+                    DOMAIN, ENTITY_KINDS, HA_PREFIX, SIGNAL_ENTITY, SIGNAL_HA_VALUE, SIGNAL_LIGHT, STORE_VERSION,
                     SYNC_EVENT)
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.LIGHT, Platform.SELECT, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.EVENT, Platform.LIGHT, Platform.NUMBER,
+             Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
@@ -77,6 +78,25 @@ def parse_ha_payload(raw: str | None) -> tuple[Any, dict]:
         except ValueError:
             pass
     return value, meta
+
+
+def parse_entity_payload(raw: str | None) -> dict:
+    """ha/<kind>/<key> data: JSON object, or a plain value ("1", "on", "21.5", "press")."""
+    raw = (raw or "").strip()
+    if raw.startswith("{"):
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                return obj
+        except ValueError:
+            pass
+    low = raw.lower()
+    if low in ("1", "on", "true", "0", "off", "false"):
+        return {"on": 1 if low in ("1", "on", "true") else 0}
+    try:
+        return {"v": float(raw)}
+    except ValueError:
+        return {"t": raw} if raw else {}
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> bool:
@@ -226,6 +246,16 @@ def _handle_event(hass: HomeAssistant, entry: ParticleConfigEntry, did: str,
                 data.store.async_delay_save(lambda: data.ha_keys, 5)
             async_dispatcher_send(hass, SIGNAL_LIGHT.format(entry_id=entry.entry_id), did, key, state)
             return
+        kind, _, sub = key.partition("/")
+        if kind in ENTITY_KINDS and sub:
+            state = parse_entity_payload(raw)
+            # Remember how to re-create it after a restart; an event's "t" is momentary.
+            meta = {"entity": kind, "state": {k: v for k, v in state.items() if k != "t"}}
+            if keys.get(key) != meta:
+                keys[key] = meta
+                data.store.async_delay_save(lambda: data.ha_keys, 5)
+            async_dispatcher_send(hass, SIGNAL_ENTITY.format(entry_id=entry.entry_id), did, kind, key, state)
+            return
         value, meta = parse_ha_payload(raw)
         if keys.get(key) != meta:
             keys[key] = meta
@@ -258,6 +288,10 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> bool:
+    # Entities declared by devices are saved with a delay; write now, or a reload within
+    # that delay (reconfigure, reauth, new firmware) would forget the newest ones.
+    data = entry.runtime_data
+    await data.store.async_save(data.ha_keys)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 

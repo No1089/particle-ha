@@ -69,9 +69,11 @@ class ParticleLight(LightEntity, RestoreEntity):
         self.device_id = device_id
         self._attr_unique_id = f"{device_id}_ha_{key}"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
-        # "light" -> the device's own name; "light/strip" -> "Strip"
+        # "light" -> the device's own name; "light/strip" -> "Strip" (or the payload's "n")
+        self._key = key
         self._attr_name = None if key == "light" else key.split("/", 1)[1].replace("_", " ").capitalize()
         self._fn = dict(DEFAULT_FN)
+        self._cmd: str | None = None  # one command function for all fields (HomeAssistant.h)
         self._attr_is_on = None
         self._attr_color_mode = ColorMode.BRIGHTNESS
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
@@ -82,6 +84,10 @@ class ParticleLight(LightEntity, RestoreEntity):
         if not s:
             return
         self._fn.update(s.get("fn") or {})
+        if s.get("cmd"):
+            self._cmd = s["cmd"]
+        if s.get("n") and self._key != "light":
+            self._attr_name = s["n"]
         if "on" in s:
             self._attr_is_on = bool(s["on"])
         if "bri" in s:
@@ -104,7 +110,14 @@ class ParticleLight(LightEntity, RestoreEntity):
             self.async_write_ha_state()
 
     async def _call(self, role: str, arg: str) -> int:
-        fn = self._fn.get(role)
+        if self._cmd:
+            # "light/<key>/<field>=<value>"; power is on=1/0
+            field = {"power": "on", "bri": "bri", "rgb": "rgb", "fx": "fx"}[role]
+            if role == "power":
+                arg = "1" if arg == "on" else "0"
+            fn, arg = self._cmd, f"{self._key}/{field}={arg}"
+        else:
+            fn = self._fn.get(role)
         if not fn:
             raise HomeAssistantError(f"this light has no {role} function")
         try:

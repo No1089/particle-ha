@@ -8,8 +8,12 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from homeassistant.const import STATE_ON
+from homeassistant.helpers.restore_state import RestoreEntity
+
 from .const import DOMAIN, SIGNAL_STREAM
 from .entity import ParticleEntity
+from .push import PushEntity, setup_push_platform
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback) -> None:
@@ -17,6 +21,27 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
     entities: list = [ParticleOnline(data.coordinator, did) for did in data.coordinator.data]
     entities.append(StreamHealth(entry))
     async_add_entities(entities)
+    setup_push_platform(hass, entry, async_add_entities, "binary", ParticleBinary)
+
+
+class ParticleBinary(PushEntity, BinarySensorEntity, RestoreEntity):
+    """ha/binary/<key> with {"on": 0|1, "dc": device class}: door, motion, moisture, ..."""
+
+    def apply(self, state: dict) -> None:
+        if "on" in state:
+            self._attr_is_on = bool(state["on"])
+        if state.get("dc"):
+            try:
+                self._attr_device_class = BinarySensorDeviceClass(state["dc"])
+            except ValueError:
+                self._attr_device_class = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.first is not None:
+            self.update_from_device(self.first, write=False)
+        elif self._attr_is_on is None and (last := await self.async_get_last_state()):
+            self._attr_is_on = last.state == STATE_ON
 
 
 class ParticleOnline(ParticleEntity, BinarySensorEntity):

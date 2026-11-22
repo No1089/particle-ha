@@ -13,12 +13,18 @@ login is never stored.
 | On the device | In Home Assistant |
 |---|---|
 | online / offline | `binary_sensor.<device>_online`, live |
-| `Particle.variable("x", …)` | `sensor.<device>_x`, read every *poll interval* |
-| `Particle.function("f", …)` | action `particle.call_function` (any argument, returns the int), and a button per function (disabled by default) |
-| `Particle.publish("ha/<key>", …)` | `sensor.<device>_<key>`, created on first publish, live, kept over restarts |
-| `Particle.publish("ha/light", {json})` | `light.<device>` (on/off, brightness, colour, effects) and `select.<device>_pattern` |
-| any other `Particle.publish(…)` | event `particle_event` (`device_id`, `event`, `data`, `published_at`) for automations |
+| `HA.value(...)` | sensors (temperature, humidity, anything with a unit), live |
+| `HA.addLight(...)` | lights: on/off, brightness, colour, effects (plus a Pattern select for HomeKit) |
+| `HA.addSwitch(...)` | switches |
+| `HA.addBinary(...)` | binary sensors: door, window, motion, leak, … |
+| `HA.addNumber(...)` | numbers (sliders/boxes) for setpoints and settings |
+| `HA.addEvent(...)` + `HA.event(...)` | event entities: button presses as automation triggers |
+| `Particle.variable(…)` | sensors, read every *poll interval* |
+| `Particle.function(…)` | action `particle.call_function` (returns the int), and a button (disabled by default) |
+| any other `Particle.publish(…)` | `particle_event` on the event bus, for automations |
 | `Particle.subscribe(…)` | action `particle.publish_event` sends events to the devices |
+
+`HA.*` comes from `firmware/HomeAssistant.h`, a header-only helper (see [Firmware](#firmware)).
 
 New variables or functions after a firmware update get their entities on their own: the integration
 notices the change after the device comes back online and reloads.
@@ -101,96 +107,89 @@ Under *Settings → Devices & services → Particle*:
 
 ## Firmware
 
-What a device needs to do for each kind of entity:
-
-| In Home Assistant | Firmware |
-|---|---|
-| online / offline | nothing |
-| a sensor, read every poll interval | `Particle.variable(...)` |
-| an action (and a button) | `Particle.function(...)`, returning an int (negative = error) |
-| a live sensor | publish `ha/<key>`: `HA.value(...)` |
-| a light | `HA.light(...)`: three functions plus `ha/light` state, all handled by the helper |
-| triggers for automations | any other `Particle.publish(...)` arrives as `particle_event` |
-| commands from Home Assistant | `Particle.subscribe(...)`, fed by `particle.publish_event` |
-
-Everything on this side is in **`firmware/HomeAssistant.h`**, a header-only helper: copy it into your
-project's `src/`. Examples, each a complete app (`particle compile <platform> firmware/examples/<name>/src`
-after copying the header into that `src/`):
-
-- `firmware/examples/light`: the device's onboard RGB LED as a Home Assistant light, with four
-  effects (solid, breathe, rainbow, blink). No extra hardware; builds for P2/Photon 2, M-SoM, Boron, Argon.
-- `firmware/examples/basics`: a variable, a function, a subscription and `ha/` values.
-
-### Values: `ha/<key>`
-
-Any event named `ha/<key>` becomes a sensor. The data can be a plain value (`"42"`, `"open"`) or JSON
-with metadata: `{"v": 21.4, "u": "°C", "dc": "temperature", "sc": "measurement", "n": "Room"}`
-(value, unit, device class, state class, name).
-
-`firmware/HomeAssistant.h` (header only; copy it into your project's `src/`) does this for you:
+Everything device-side is in **`firmware/HomeAssistant.h`**, one header with no dependencies: copy it
+into your project's `src/`. Declare entities in `setup()`, call `HA.begin()`, and call `HA.loop()` from
+`loop()`:
 
 ```cpp
 #include "HomeAssistant.h"
 
-void setup() {
-    HA.begin();   // answer hass-sync (see below)
-}
+static const char *const EFFECTS[] = {"solid", "spin", "rainbow"};
+static const char *const PRESSES[] = {"press", "double", "hold"};
 
-void loop() {
-    HA.value("temperature", 21.4, "°C", "temperature", "measurement");
-    HA.value("door", "open");
-    HA.loop();    // sends queued values within Particle's 1 publish/s limit
-}
-```
-
-A value is sent when it changes, and every 15 minutes (`HA.refreshSeconds`).
-
-### Lights: `ha/light`
-
-With the helper, a light is a few lines (`firmware/examples/light`):
-
-```cpp
-static const char *const EFFECTS[] = {"solid", "breathe", "rainbow", "blink"};
-
-void applyLight(const HALight &l) {   // called after Home Assistant changes it
-    // l.on, l.brightness (0-255), l.rgb (0xRRGGBB), l.effect (index into EFFECTS)
-}
+void onLight(const char *key, const HALight &l) { /* l.on, l.brightness, l.rgb, l.effect */ }
+void onSwitch(const char *key, bool on) { /* drive the relay */ }
+void onNumber(const char *key, float v) { /* new setting */ }
 
 void setup() {
-    HA.light(EFFECTS, 4, applyLight);   // registers mode / brightness / color
+    HA.addLight("ring", "Ring", EFFECTS, 3, onLight);
+    HA.addSwitch("relay", "Relay", false, onSwitch);
+    HA.addBinary("door", "Door", "door", false);
+    HA.addNumber("setpoint", "Setpoint", 5, 30, 0.5, 21, "°C", onNumber);
+    HA.addEvent("button1", "Button 1", PRESSES, 3);
     HA.begin();
 }
 
 void loop() {
-    HA.loop();                          // publishes the state after every change
+    HA.setBinary("door", digitalRead(D2));           // report changes
+    if (pressed) HA.event("button1", "press");       // momentary events
+    HA.value("temperature", 21.4, "°C", "temperature", "measurement");
+    HA.loop();                                        // sends, ~1 publish/s
 }
 ```
 
-After a local change (a button on the device), update `HA.state()` and call `HA.lightChanged()`.
+In Home Assistant these show up on the device as `light.<device>_ring`, `switch.<device>_relay`,
+`binary_sensor.<device>_door`, `number.<device>_setpoint`, `event.<device>_button_1` and
+`sensor.<device>_temperature`. After a local change (a button toggling the relay), call the matching
+`HA.set…()` (or change `HA.light(key)` and call `HA.lightChanged(key)`) so Home Assistant follows.
 
-Under the hood, a device that publishes `ha/light` (or `ha/light/<name>` for several) becomes a light:
+How it works:
 
-```json
-{"on": 1, "bri": 128, "rgb": "ff6a1e", "fx": "rainbow", "fxs": ["warm", "rainbow", "solid"]}
-```
+- Each entity publishes its state as `ha/<kind>/<key>` (`ha/<key>` for sensors) when it changes.
+  The integration creates the entity on the first publish and remembers it across restarts.
+- Commands from Home Assistant arrive through **one** cloud function, `ha`, as `<kind>/<key>=<value>`
+  (lights: `light/<key>/<field>=<value>`, field `on`, `bri`, `rgb` or `fx`). The helper checks the
+  value, updates the state, calls your handler and publishes the new state. Anything it can't apply
+  returns -1, which Home Assistant shows as an error. One function for everything keeps a device
+  well inside Particle's limit on cloud functions.
+- Publishes are queued and sent at Particle's rate of about one a second, events first. A state is
+  only resent when it changes, every 15 minutes (`HA.refreshSeconds`), and when Home Assistant
+  publishes `hass-sync` (whenever its event stream reconnects), so it catches up after outages.
+- Event entities are announced at boot, so they can be picked as automation triggers before the
+  first press.
+- Up to 20 entities and 16 sensors per device (`MAX_ENTITIES`, `MAX_VALUES`).
 
-Everything but `on` is optional (`rgb` gives a colour picker, `fxs` an effect list). Home Assistant
-drives it through cloud functions: `mode("on" | "off" | <effect>)`, `brightness("0".."255")` and
-`color("rrggbb")`. Other names can be given in the payload, e.g.
-`"fn": {"power": "power", "fx": "effect", "bri": "level", "rgb": "rgb"}`. A negative return value
-shows as an error. When an effect and a colour arrive together, the effect is set first, so a device
-can use the colour to tint the effect. Publish the state on every change, local ones included
-(buttons, touch), so Home Assistant follows.
+### Apps
 
-With an effect list, the device also gets a **Pattern** select. HomeKit has no light effects, but Home
-Assistant's HomeKit bridge shows a select as one switch per option, so with the select on the bridge,
-patterns can be picked in the Home app, in scenes and with Siri.
+Complete apps in `firmware/apps/` (copy `HomeAssistant.h` into the app's `src/`, then
+`cd firmware/apps/<name> && particle compile <platform> .`):
 
-### Resync: `hass-sync`
+| App | What it shows | Builds for |
+|---|---|---|
+| `button` | A four-button controller with an LED ring: 4 event entities (press, double, hold), 2 lights (a WS2812B ring with 4 effects, and the onboard RGB LED), 2 switches (chime, night mode), 2 binary sensors (door contact, PIR motion), 2 numbers (hold time, ring auto-off), temperature and humidity from an SHT4x | P2 / Photon 2, Argon, Boron |
+| `climate` | Temperature, humidity and dew point from an SHT40/41/45 on I2C, with a number for the measuring interval | any |
+| `light` | The onboard RGB status LED as a light with 4 effects; no extra hardware | any |
+| `basics` | `Particle.variable`, `Particle.function`, `Particle.subscribe` and `ha/` values | any |
 
-Whenever the integration's event stream (re)connects, it publishes `hass-sync` into the product.
-Devices that subscribe to it (`HA.begin()` does) send their state again at once, so nothing stays
-stale after an outage.
+(The folder is `apps`, not `examples`: the Particle CLI treats a folder with an `examples/`
+subfolder as a library and refuses to compile the projects inside.)
+
+### Without the helper
+
+The protocol is plain events and one function, so any firmware can speak it: publish `ha/<key>`
+with a value or `{"v": 21.4, "u": "°C", "dc": "temperature", "sc": "measurement", "n": "Room"}` for
+a sensor; `ha/switch/<key>` and `ha/binary/<key>` with `{"on": 0|1, "n": …, "dc": …}`;
+`ha/number/<key>` with `{"v", "min", "max", "step", "u"}`; `ha/event/<key>` with `{"t": "press",
+"ts": ["press", …]}`; `ha/light/<key>` with `{"on", "bri", "rgb", "fx", "fxs"}`. Add `"cmd": "ha"`
+to the commandable ones and implement that function.
+
+A light can also use separate functions instead of `ha`: publish `ha/light` without `cmd`, and Home
+Assistant calls `mode("on" | "off" | <effect>)`, `brightness("0".."255")` and `color("rrggbb")` (names
+can be changed with `"fn": {"power": …, "fx": …, "bri": …, "rgb": …}`).
+
+With an effect list, a light also gets a **Pattern** select: HomeKit has no light effects, but Home
+Assistant's HomeKit bridge shows a select as one switch per option, so patterns can be picked in the
+Home app, in scenes and with Siri.
 
 ## The event stream
 
@@ -220,9 +219,11 @@ not by devices; `hass-sync` reaches only devices that subscribe to it.
 
 ## Development
 
-- `tests/test_stream.py` drives the event stream through each failure mode with a fake client:
-  `python tests/test_stream.py` in an environment with `homeassistant` installed. CI
-  (`.github/workflows/validate.yml`) runs it with `hassfest` and the HACS validator.
+- Tests: `pip install pytest-homeassistant-custom-component`, then `pytest` runs the integration in
+  a test Home Assistant against a fake Particle Cloud (`tests/test_entities.py`: every entity type,
+  the commands sent back, rejected commands, entities surviving a reload), and
+  `python tests/check_stream.py` drives the event stream through its failure modes. CI
+  (`.github/workflows/validate.yml`) runs both, plus `hassfest` and the HACS validator.
 - Releases: bump `version` in `manifest.json`, tag `vX.Y.Z`, publish a GitHub release; HACS offers it
   as an update.
 - Copying straight to a Home Assistant OS box during development:
@@ -257,9 +258,13 @@ November 2026:
   own variables), `hass-sync` on (re)connect, event stream canary.
 - **Failure modes** (dead connection, zombie stream, long outage and Repairs issue, rejected token):
   unit tests with a fake client.
-- **Firmware**: `examples/light` on an M-SoM: `mode` / `brightness` / `color` change the LED and
-  each change publishes `ha/light` within a second; unknown effects and out-of-range values return -1.
-  Builds for P2, M-SoM, Boron and Argon (Device OS 6.3.0).
+- **Entities** (`pytest`, test Home Assistant with a fake cloud): switches, binary sensors, numbers,
+  events (announce, then trigger), lights and the Pattern select through the `ha` function, sensors,
+  `hass-sync`, a rejected command raising an error, entities re-created after a reload.
+- **Firmware**: `apps/light` on an M-SoM: the light announces itself, `ha` commands change the LED
+  and publish the new state, `hass-sync` gets an answer, bad commands return -1. All apps build for
+  their listed platforms (Device OS 6.3.0); `apps/button` and `apps/climate` haven't run on their
+  hardware yet.
 - **Not run yet**: actually moving or importing a device into a product, creating a product, the
   development-device flag.
 
