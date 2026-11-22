@@ -122,6 +122,9 @@ class ParticleAccount:
         if device_id in (res.get("invalidDeviceIds") or []) + (res.get("nonmemberDeviceIds") or []):
             raise ParticleError(f"Particle refused to add {device_id} to product {product_id}")
 
+    async def remove_from_product(self, product_id: int, device_id: str) -> None:
+        await self._req("DELETE", f"/products/{product_id}/devices/{device_id}")
+
     async def set_development(self, product_id: int, device_id: str) -> None:
         await self._req("PUT", f"/products/{product_id}/devices/{device_id}", data={"development": "true"})
 

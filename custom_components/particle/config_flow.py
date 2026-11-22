@@ -35,6 +35,7 @@ from .const import (CONF_API_USER, CONF_DEVICES, CONF_POLL_INTERVAL, CONF_PRODUC
                     PLATFORM_NAMES)
 
 NEW_PRODUCT = "__new__"
+KEEP_PRODUCT = "__keep__"
 
 LOGIN_SCHEMA = vol.Schema({
     vol.Required(CONF_USERNAME): TextSelector(TextSelectorConfig(type=TextSelectorType.EMAIL,
@@ -119,6 +120,7 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
         self._products: list[dict] = []
         self._device: dict | None = None
         self._product: dict | None = None
+        self._current: dict | None = None  # product the device is in now, if any
 
     # --- entry points ------------------------------------------------------------
 
@@ -163,11 +165,12 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
             self._device = next(d for d in self._devices if d["id"] == user_input["device"])
             if is_product_device(self._device):
                 pid = self._device["product_id"]
-                self._product = next((p for p in self._products if p["id"] == pid), None)
-                if self._product is None:
+                self._current = next((p for p in self._products if p["id"] == pid), None)
+                if self._current is None:
                     return self.async_show_form(step_id="device", data_schema=self._device_schema(),
                                                 errors={"base": "not_product_admin"})
-                return await self._finish()
+            else:
+                self._current = None
             return await self.async_step_product()
         return self.async_show_form(step_id="device", data_schema=self._device_schema(),
                                     description_placeholders={"count": str(len(self._devices))})
@@ -187,10 +190,15 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
     async def async_step_product(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         dev = self._device
         platform = dev["platform_id"]
-        same = [p for p in self._products if p.get("platform_id") == platform]
+        current = self._current
+        same = [p for p in self._products if p.get("platform_id") == platform
+                and not (current and p["id"] == current["id"])]
         errors: dict[str, str] = {}
         if user_input is not None:
             choice = user_input["product"]
+            if current and choice == KEEP_PRODUCT:
+                self._product = current
+                return await self._finish()
             try:
                 if choice == NEW_PRODUCT:
                     name = (user_input.get("name") or "").strip()
@@ -202,6 +210,9 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
                 else:
                     self._product = next(p for p in same if str(p["id"]) == choice)
                 pid = self._product["id"]
+                if current:  # move: a device is in one product at a time
+                    await self._account.remove_from_product(current["id"], dev["id"])
+                    current = self._current = None
                 await self._account.import_device(pid, dev["id"])
                 # Released product firmware would replace the device's own app.
                 if await self._account.has_released_firmware(pid):
@@ -213,8 +224,15 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
                 self._error = str(err)
             else:
                 return await self._finish()
-        opts = [SelectOptionDict(value=str(p["id"]), label=f"{p['name']} ({p['id']})") for p in same]
-        opts.append(SelectOptionDict(value=NEW_PRODUCT, label="New product…"))
+        opts = []
+        if current:
+            opts.append(SelectOptionDict(value=KEEP_PRODUCT,
+                                         label=f"Keep it in {current['name']} ({current['id']})"))
+        opts += [SelectOptionDict(value=str(p["id"]),
+                                  label=(f"Move it to {p['name']} ({p['id']})" if current
+                                         else f"{p['name']} ({p['id']})")) for p in same]
+        opts.append(SelectOptionDict(value=NEW_PRODUCT,
+                                     label="Move it to a new product…" if current else "New product…"))
         schema = vol.Schema({
             vol.Required("product", default=opts[0]["value"]): SelectSelector(
                 SelectSelectorConfig(options=opts, mode=SelectSelectorMode.LIST)),
@@ -222,6 +240,8 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
         })
         return self.async_show_form(step_id="product", data_schema=schema, errors=errors,
                                     description_placeholders={
+                                        "current": (f"It is in **{current['name']}** now." if current
+                                                    else "It isn't in a product yet (sandbox)."),
                                         "device": dev.get("name") or dev["id"],
                                         "platform": platform_name(platform),
                                         "error": getattr(self, "_error", "")})

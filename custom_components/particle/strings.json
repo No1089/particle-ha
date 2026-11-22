@@ -18,14 +18,14 @@
       },
       "device": {
         "title": "Device",
-        "description": "Pick a device ({count} on the account). Devices in a product use that product; sandbox devices get put in one in the next step. More devices of the same product can be added later under Configure.",
+        "description": "Pick a device ({count} on the account). The next step asks which product it should be in. More devices of the same product can be added later under Configure.",
         "data": {
           "device": "Device"
         }
       },
       "product": {
         "title": "Product for {device}",
-        "description": "Home Assistant's API user is scoped to a product, so {device} needs one. Pick a {platform} product or create a new one; the device is added to it. If the product has released firmware, the device is marked as a development device so that firmware won't replace yours.\n\n{error}",
+        "description": "{current} Home Assistant's API user is scoped to one product. Keep the device where it is, or move it to another {platform} product (existing or new): it is removed from its current product and added to the new one. If the target product has released firmware, the device is marked as a development device so that firmware won't replace yours.\n\n{error}",
         "data": {
           "product": "Product",
           "name": "Name for a new product"
