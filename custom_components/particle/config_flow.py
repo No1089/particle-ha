@@ -111,6 +111,13 @@ class LoginSteps:
             await self._account.logout()
             self._account = None
 
+    @callback
+    def async_remove(self) -> None:
+        """Flow cancelled or abandoned: delete the login token now, not in an hour."""
+        if self._account:
+            account, self._account = self._account, None
+            self.hass.async_create_background_task(account.logout(), "particle logout")
+
 
 class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
     VERSION = 1

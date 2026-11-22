@@ -111,9 +111,10 @@ Home Assistant never keeps your Particle login. The setup flow:
 
 1. **Log in** with your Particle email and password, plus the code from your authenticator if MFA
    is on (`grant_type=urn:custom:mfa-otp`). SSO accounts aren't supported. The login token lives
-   an hour at most and is deleted at the end of the flow.
-2. **Pick a device.** A device in a product uses that product. A sandbox device gets a product
-   in the next step: an existing one for its platform, or a new one, and the device is imported.
+   an hour at most and is deleted when the flow ends, including when it's cancelled.
+2. **Pick a device**, then its product. A device that's already in a product can stay there (the
+   default) or move to another product of its platform, existing or new: it's removed from the old
+   product and imported into the new one. A sandbox device goes into an existing or new product.
    If the product has released firmware (a default or a group release), the device is marked as
    a development device, so that firmware won't replace the device's own.
 3. **API user.** The flow creates an API user on the product, named "Home Assistant (<your home's
@@ -179,5 +180,6 @@ wrong/right MFA code, device list, product device list under Configure, Revoke (
 the product), re-authenticate (new API user), the product endpoints for an API user (device list/info,
 variable, function, product SSE with canary echo, product publish reaching a device's subscribe).
 Checked by hand against the API: an API user can't delete itself or revoke its own token; deleting it
-kills its token at once. Not run yet: a real password/MFA login, the product step for a sandbox device
-(import, new product, development flag), adding a device to an already set up product.
+kills its token at once. Also tested: adding a device to an already set up product (keep), the product step's choices for
+sandbox and product devices. Not run yet: a real password/MFA login, an actual import or move, creating
+a product (the CLI's `POST /v1/user/products`; may not be available for sandbox products), the development flag.
