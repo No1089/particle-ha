@@ -56,7 +56,9 @@ A device that publishes `ha/light` (or `ha/light/<name>` for several) becomes a 
 All fields but `on` are optional (`rgb` → colour picker, `fxs` → effect list). HA drives it through
 cloud functions: `mode("on"|"off"|<effect>)`, `brightness("0".."255")`, `color("rrggbb")`. Other names
 can be given in the payload, e.g. `"fn": {"power": "power", "fx": "effect", "bri": "level", "rgb": "rgb"}`.
-A negative return value is shown in HA as an error.
+A negative return value is shown in HA as an error. When HA sends an effect and a colour together, the effect
+is set first, so a device can use the colour to tint that effect (the Snowflake does for twinkle, comet
+and candy) rather than switching to a solid colour.
 
 If the payload lists effects (`fxs`), the device also gets a **Pattern** select (`select.<device>_pattern`).
 It duplicates the light's effects on purpose: HomeKit has no effects, but HA's HomeKit bridge shows a

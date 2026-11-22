@@ -117,14 +117,16 @@ class ParticleLight(LightEntity, RestoreEntity):
 
     async def async_turn_on(self, **kw: Any) -> None:
         new: dict = {"on": 1}
+        # Effect first, so a colour sent with it tints the new effect (devices may
+        # treat a colour as "tint this pattern" or as "switch to a solid colour").
+        if ATTR_EFFECT in kw:
+            await self._call("fx", kw[ATTR_EFFECT])
+            new["fx"] = kw[ATTR_EFFECT]
         if ATTR_RGB_COLOR in kw:
             r, g, b = kw[ATTR_RGB_COLOR]
             await self._call("rgb", f"{r:02x}{g:02x}{b:02x}")
             new["rgb"] = f"{r:02x}{g:02x}{b:02x}"
-        elif ATTR_EFFECT in kw:
-            await self._call("fx", kw[ATTR_EFFECT])
-            new["fx"] = kw[ATTR_EFFECT]
-        elif not self._attr_is_on or not kw:
+        if not (ATTR_EFFECT in kw or ATTR_RGB_COLOR in kw) and (not self._attr_is_on or not kw):
             await self._call("power", "on")
         if ATTR_BRIGHTNESS in kw:
             await self._call("bri", str(kw[ATTR_BRIGHTNESS]))
