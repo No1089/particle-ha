@@ -219,3 +219,7 @@ November 2026:
   unit tests with a fake client.
 - **Not run yet**: actually moving or importing a device into a product, creating a product, the
   development-device flag.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). The Particle name and logo belong to Particle Industries.
