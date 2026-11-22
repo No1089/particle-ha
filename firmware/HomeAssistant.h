@@ -1,5 +1,8 @@
-// HomeAssistant.h: publish values that the Home Assistant "particle" integration
-// turns into sensors on its own. Header only; copy it into your project's src/.
+// HomeAssistant.h: the device side of the Home Assistant "particle" integration
+// (https://github.com/No1089/particle-ha). Header only; copy it into your project's src/.
+//
+// Sensors: HA.value(...) publishes values that become HA sensors on their own.
+// Lights:  HA.light(...) makes the device an HA light (see the light section below).
 //
 //   #include "HomeAssistant.h"
 //   HA.begin();                                             // in setup()
@@ -18,6 +21,16 @@
 // `refreshSeconds` (default 15 min) so HA catches up after its own restarts.
 #pragma once
 #include "Particle.h"
+
+// State of a light, as Home Assistant sees it.
+struct HALight {
+    bool on = true;
+    uint8_t brightness = 128;  // 0-255
+    uint32_t rgb = 0xFFFFFF;   // 0xRRGGBB
+    uint8_t effect = 0;        // index into the effect list
+};
+// Called after Home Assistant changed the light: apply `l` to your hardware.
+typedef void (*HALightHandler)(const HALight &l);
 
 class HomeAssistantClass {
 public:
@@ -47,12 +60,38 @@ public:
 
     uint32_t refreshSeconds = 15 * 60;
 
+    // ---- light ---------------------------------------------------------------------
+    // Makes the device a light in HA: on/off, brightness, colour, and effects (HA's
+    // effect list, plus a "Pattern" select that HomeKit can use). Registers three cloud
+    // functions, which the integration calls:
+    //   mode("on" | "off" | <effect name>), brightness("0".."255"), color("rrggbb")
+    // and publishes the state as `ha/light` whenever it changes. `effects` must stay
+    // valid (a static array); pass nullptr / 0 for a light without effects. Call before
+    // HA.begin(). After a local change (a button, say), edit HA.state() and call
+    // HA.lightChanged() so HA follows.
+    void light(const char *const *effects, uint8_t effectCount, HALightHandler onChange) {
+        lightEffects = effects;
+        lightEffectCount = effectCount;
+        lightHandler = onChange;
+        hasLight = true;
+        lightDirty = true;
+        Particle.function("mode", &HomeAssistantClass::fnMode, this);
+        Particle.function("brightness", &HomeAssistantClass::fnBrightness, this);
+        Particle.function("color", &HomeAssistantClass::fnColor, this);
+    }
+    HALight &state() { return lightState; }
+    void lightChanged() { lightDirty = true; }
+
     // Call once in setup(): when HA's event stream (re)connects it publishes
     // "hass-sync", and every value is sent again so HA catches up at once.
     void begin() { Particle.subscribe("hass-sync", &HomeAssistantClass::onSync, this); }
 
     void loop() {
         if (!Particle.connected() || millis() - lastSend < 1100) return;
+        if (hasLight && (lightDirty || lightSentAt == 0 || millis() - lightSentAt > refreshSeconds * 1000UL)) {
+            publishLight();
+            return;
+        }
         Slot *pick = nullptr;
         for (int i = 0; i < count; i++) {
             Slot &s = slots[i];
@@ -92,6 +131,85 @@ private:
 
     void onSync(const char *, const char *) {
         for (int i = 0; i < count; i++) slots[i].dirty = true;
+        lightDirty = true;
+    }
+
+    // light
+    bool hasLight = false, lightDirty = false;
+    uint32_t lightSentAt = 0;
+    HALight lightState;
+    const char *const *lightEffects = nullptr;
+    uint8_t lightEffectCount = 0;
+    HALightHandler lightHandler = nullptr;
+
+    void lightApply() {
+        lightDirty = true;
+        if (lightHandler) lightHandler(lightState);
+    }
+
+    int fnMode(String arg) {
+        arg.trim();
+        arg.toLowerCase();
+        if (arg == "off") { lightState.on = false; lightApply(); return 0; }
+        if (arg == "on") { lightState.on = true; lightApply(); return 1; }
+        for (uint8_t i = 0; i < lightEffectCount; i++) {
+            if (arg.equalsIgnoreCase(lightEffects[i])) {
+                lightState.effect = i;
+                lightState.on = true;
+                lightApply();
+                return i;
+            }
+        }
+        return -1;  // HA shows a negative return value as an error
+    }
+
+    int fnBrightness(String arg) {
+        arg.trim();
+        if (arg.length() == 0 || arg.length() > 3) return -1;
+        for (unsigned i = 0; i < arg.length(); i++)
+            if (!isdigit((unsigned char)arg.charAt(i))) return -1;
+        int v = arg.toInt();
+        if (v > 255) return -1;
+        lightState.brightness = v;
+        lightApply();
+        return v;
+    }
+
+    int fnColor(String arg) {
+        arg.trim();
+        if (arg.startsWith("#")) arg = arg.substring(1);
+        if (arg.length() != 6) return -1;
+        char *end = nullptr;
+        uint32_t c = strtoul(arg.c_str(), &end, 16);
+        if (!end || *end) return -1;
+        lightState.rgb = c;
+        lightState.on = true;
+        lightApply();
+        return 0;
+    }
+
+    void publishLight() {
+        char json[512];
+        JSONBufferWriter w(json, sizeof(json) - 1);
+        char hex[7];
+        snprintf(hex, sizeof(hex), "%06lx", (unsigned long)(lightState.rgb & 0xFFFFFF));
+        w.beginObject();
+        w.name("on").value(lightState.on ? 1 : 0);
+        w.name("bri").value((int)lightState.brightness);
+        w.name("rgb").value(hex);
+        if (lightEffectCount) {
+            w.name("fx").value(lightEffects[lightState.effect < lightEffectCount ? lightState.effect : 0]);
+            w.name("fxs").beginArray();
+            for (uint8_t i = 0; i < lightEffectCount; i++) w.value(lightEffects[i]);
+            w.endArray();
+        }
+        w.endObject();
+        json[std::min(w.dataSize(), sizeof(json) - 1)] = 0;
+        lastSend = millis();
+        if (Particle.publish("ha/light", json, PRIVATE)) {
+            lightDirty = false;
+            lightSentAt = millis() ? millis() : 1;
+        }
     }
 
     static int decimalsOf(const char *s) {

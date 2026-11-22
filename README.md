@@ -101,6 +101,26 @@ Under *Settings → Devices & services → Particle*:
 
 ## Firmware
 
+What a device needs to do for each kind of entity:
+
+| In Home Assistant | Firmware |
+|---|---|
+| online / offline | nothing |
+| a sensor, read every poll interval | `Particle.variable(...)` |
+| an action (and a button) | `Particle.function(...)`, returning an int (negative = error) |
+| a live sensor | publish `ha/<key>`: `HA.value(...)` |
+| a light | `HA.light(...)`: three functions plus `ha/light` state, all handled by the helper |
+| triggers for automations | any other `Particle.publish(...)` arrives as `particle_event` |
+| commands from Home Assistant | `Particle.subscribe(...)`, fed by `particle.publish_event` |
+
+Everything on this side is in **`firmware/HomeAssistant.h`**, a header-only helper: copy it into your
+project's `src/`. Examples, each a complete app (`particle compile <platform> firmware/examples/<name>/src`
+after copying the header into that `src/`):
+
+- `firmware/examples/light`: the device's onboard RGB LED as a Home Assistant light, with four
+  effects (solid, breathe, rainbow, blink). No extra hardware; builds for P2/Photon 2, M-SoM, Boron, Argon.
+- `firmware/examples/basics`: a variable, a function, a subscription and `ha/` values.
+
 ### Values: `ha/<key>`
 
 Any event named `ha/<key>` becomes a sensor. The data can be a plain value (`"42"`, `"open"`) or JSON
@@ -123,12 +143,32 @@ void loop() {
 }
 ```
 
-A value is sent when it changes, and every 15 minutes (`HA.refreshSeconds`). `firmware/example/` uses
-everything: a variable, a function, a subscription and `ha/` values.
+A value is sent when it changes, and every 15 minutes (`HA.refreshSeconds`).
 
 ### Lights: `ha/light`
 
-A device that publishes `ha/light` (or `ha/light/<name>` for several) becomes a light:
+With the helper, a light is a few lines (`firmware/examples/light`):
+
+```cpp
+static const char *const EFFECTS[] = {"solid", "breathe", "rainbow", "blink"};
+
+void applyLight(const HALight &l) {   // called after Home Assistant changes it
+    // l.on, l.brightness (0-255), l.rgb (0xRRGGBB), l.effect (index into EFFECTS)
+}
+
+void setup() {
+    HA.light(EFFECTS, 4, applyLight);   // registers mode / brightness / color
+    HA.begin();
+}
+
+void loop() {
+    HA.loop();                          // publishes the state after every change
+}
+```
+
+After a local change (a button on the device), update `HA.state()` and call `HA.lightChanged()`.
+
+Under the hood, a device that publishes `ha/light` (or `ha/light/<name>` for several) becomes a light:
 
 ```json
 {"on": 1, "bri": 128, "rgb": "ff6a1e", "fx": "rainbow", "fxs": ["warm", "rainbow", "solid"]}
@@ -217,6 +257,9 @@ November 2026:
   own variables), `hass-sync` on (re)connect, event stream canary.
 - **Failure modes** (dead connection, zombie stream, long outage and Repairs issue, rejected token):
   unit tests with a fake client.
+- **Firmware**: `examples/light` on an M-SoM: `mode` / `brightness` / `color` change the LED and
+  each change publishes `ha/light` within a second; unknown effects and out-of-range values return -1.
+  Builds for P2, M-SoM, Boron and Argon (Device OS 6.3.0).
 - **Not run yet**: actually moving or importing a device into a product, creating a product, the
   development-device flag.
 
