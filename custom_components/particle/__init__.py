@@ -37,7 +37,7 @@ from .const import (BUS_EVENT, CONF_DEVICES, CONF_POLL_INTERVAL, DEFAULT_POLL_IN
                     SYNC_EVENT)
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.LIGHT, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.LIGHT, Platform.SELECT, Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORM_NAMES = {
