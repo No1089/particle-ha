@@ -5,6 +5,7 @@
   "config_flow": true,
   "documentation": "https://github.com/No1089/particle-ha",
   "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/No1089/particle-ha/issues",
   "requirements": [],
-  "version": "0.2.1"
+  "version": "0.3.0"
 }

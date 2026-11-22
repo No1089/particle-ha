@@ -4,9 +4,10 @@ Home Assistant keeps only the API user's token (product scope, six permissions).
 The owner login is short-lived and deleted at the end of every flow that used it.
 
 Flows:
-- user / reconfigure: login (+ MFA) -> device -> product (existing or new; the device is
-  imported if needed) -> API user. Reconfigure switches an entry in place, so entity
-  IDs, HomeKit and history are kept; its old API user is deleted.
+- user / reconfigure: login (+ MFA) -> device -> product (keep, or move to an existing or
+  new product of the device's platform) -> API user. Reconfigure switches an entry to
+  another device/product in place, so entity IDs and history are kept; its old API user
+  is deleted.
 - reauth: login -> new API user for the entry's product (old one deleted).
 - options: Devices (pick more devices of the product) or Revoke (login -> delete the
   API user; the entry then waits for re-authentication).
@@ -161,13 +162,11 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="cannot_connect")
         if self.source == SOURCE_REAUTH:
             entry = self._get_reauth_entry()
-            pid = entry.data.get(CONF_PRODUCT_ID)
-            if pid:
-                self._product = next((p for p in self._products if p["id"] == pid),
-                                     {"id": pid, "name": entry.data.get(CONF_PRODUCT_NAME, str(pid)),
-                                      "slug": entry.data.get(CONF_PRODUCT_SLUG)})
-                return await self._finish()
-            # legacy account-token entry: choose a device like reconfigure
+            pid = entry.data[CONF_PRODUCT_ID]
+            self._product = next((p for p in self._products if p["id"] == pid),
+                                 {"id": pid, "name": entry.data.get(CONF_PRODUCT_NAME, str(pid)),
+                                  "slug": entry.data.get(CONF_PRODUCT_SLUG)})
+            return await self._finish()
         return await self.async_step_device()
 
     # --- device and product ----------------------------------------------------------
@@ -346,7 +345,7 @@ class ParticleOptionsFlow(LoginSteps, OptionsFlow):
                 CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL])})
         data = self.config_entry.data
         client = ParticleClient(async_get_clientsession(self.hass), data.get(CONF_ACCESS_TOKEN, ""),
-                                data.get(CONF_PRODUCT_ID))
+                                data[CONF_PRODUCT_ID])
         try:
             devices = await client.devices()
         except ParticleAuthError:
@@ -365,7 +364,7 @@ class ParticleOptionsFlow(LoginSteps, OptionsFlow):
             vol.Required(CONF_POLL_INTERVAL, default=self.config_entry.options.get(
                 CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)): NumberSelector(
                 NumberSelectorConfig(min=30, max=86400, step=1, unit_of_measurement="s")),
-        }), description_placeholders={"product": data.get(CONF_PRODUCT_NAME) or "the account"})
+        }), description_placeholders={"product": data.get(CONF_PRODUCT_NAME) or str(data[CONF_PRODUCT_ID])})
 
     async def async_step_revoke(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self.async_step_login()

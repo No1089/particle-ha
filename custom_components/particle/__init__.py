@@ -81,9 +81,9 @@ def parse_ha_payload(raw: str | None) -> tuple[Any, dict]:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> bool:
     token = entry.data.get(CONF_ACCESS_TOKEN)
-    if not token:  # revoked from the options flow
+    if not token or not entry.data.get(CONF_PRODUCT_ID):  # revoked from the options flow
         raise ConfigEntryAuthFailed("Particle access was revoked; re-authenticate to create a new API user")
-    client = ParticleClient(async_get_clientsession(hass), token, entry.data.get(CONF_PRODUCT_ID))
+    client = ParticleClient(async_get_clientsession(hass), token, entry.data[CONF_PRODUCT_ID])
     device_ids: list[str] = entry.options.get(CONF_DEVICES, entry.data.get(CONF_DEVICES, []))
     interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
 
@@ -142,8 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> 
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, f"account_{entry.entry_id}")},
         manufacturer="Particle", name="Particle Cloud",
-        model=(f"Product {entry.data[CONF_PRODUCT_ID]}, API user" if entry.data.get(CONF_PRODUCT_ID)
-               else "Account token"),
+        model=f"Product {entry.data[CONF_PRODUCT_ID]}, API user",
         entry_type=dr.DeviceEntryType.SERVICE,
         configuration_url=_console_url(entry),
     )
@@ -287,12 +286,17 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async def publish_event(call: ServiceCall) -> None:
         entries = hass.config_entries.async_loaded_entries(DOMAIN)
         if not entries:
-            raise ServiceValidationError("No Particle account is set up")
-        try:
-            await entries[0].runtime_data.client.publish(
-                call.data["name"], call.data.get("data", ""), ttl=call.data.get("ttl", 60))
-        except ParticleError as err:
-            raise HomeAssistantError(str(err)) from err
+            raise ServiceValidationError("No Particle product is set up")
+        # One entry per product: publish into each, so devices in all of them get it.
+        failed = []
+        for entry in entries:
+            try:
+                await entry.runtime_data.client.publish(
+                    call.data["name"], call.data.get("data", ""), ttl=call.data.get("ttl", 60))
+            except ParticleError as err:
+                failed.append(f"{entry.title}: {err}")
+        if failed:
+            raise HomeAssistantError("; ".join(failed))
 
     hass.services.async_register(
         DOMAIN, "call_function", call_function,

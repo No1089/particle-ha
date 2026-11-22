@@ -122,7 +122,7 @@
     },
     "publish_event": {
       "name": "Publish event",
-      "description": "Publish a private event that the account's devices can subscribe to with Particle.subscribe().",
+      "description": "Publish an event into every Particle product set up in Home Assistant; their devices receive it with Particle.subscribe().",
       "fields": {
         "name": {
           "name": "Name",

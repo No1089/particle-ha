@@ -19,16 +19,15 @@ class ParticleError(Exception):
 
 
 class ParticleClient:
-    """Runtime client. With `product`, every call goes through the product endpoints,
-    which is all a product API user token may use; without it, the account ones
-    (legacy setup with a full account token)."""
+    """Runtime client for one product, with that product's API user token. Every call
+    goes through the product endpoints, which is all such a token may use."""
 
-    def __init__(self, session: aiohttp.ClientSession, token: str, product: int | None = None) -> None:
+    def __init__(self, session: aiohttp.ClientSession, token: str, product: int) -> None:
         self._session = session
         self._headers = {"Authorization": f"Bearer {token}"}
         self.product = product
-        self._dev = f"/products/{product}/devices" if product else "/devices"
-        self._events = f"/products/{product}/events" if product else "/devices/events"
+        self._dev = f"/products/{product}/devices"
+        self._events = f"/products/{product}/events"
 
     async def _request(self, method: str, path: str, data: dict | None = None) -> Any:
         try:
@@ -46,12 +45,7 @@ class ParticleClient:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise ParticleError(f"{method} {path}: {err}") from err
 
-    async def user(self) -> dict:
-        return await self._request("GET", "/user")
-
     async def devices(self) -> list[dict]:
-        if not self.product:
-            return await self._request("GET", "/devices")
         out: list[dict] = []
         page = 1
         while True:
@@ -71,11 +65,8 @@ class ParticleClient:
         res = await self._request("POST", f"{self._dev}/{device_id}/{name}", {"arg": arg})
         return res.get("return_value")
 
-    async def publish(self, name: str, data: str = "", private: bool = True, ttl: int = 60) -> None:
-        body = {"name": name, "data": data, "ttl": ttl}
-        if not self.product:
-            body["private"] = str(private).lower()
-        await self._request("POST", self._events, body)
+    async def publish(self, name: str, data: str = "", ttl: int = 60) -> None:
+        await self._request("POST", self._events, {"name": name, "data": data, "ttl": ttl})
 
     async def events(self) -> AsyncIterator[tuple[str, dict]]:
         """Yield (event name, payload) from the SSE stream of all the account's devices.
