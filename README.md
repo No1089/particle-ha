@@ -11,6 +11,7 @@ through the Particle Cloud. Set it up from the UI with an access token, pick dev
 | `Particle.publish("ha/<key>", …)` | `sensor.<device>_<key>`, created on first publish, live; keeps its value over HA restarts |
 | any other `Particle.publish(...)` | HA bus event `particle_event` (`device_id`, `event`, `data`, `published_at`) for automations |
 | `Particle.subscribe("home/", …)` | action `particle.publish_event` sends private events to the devices |
+| `Particle.publish("ha/light", {json})` | `light.<device>`: on/off, brightness, RGB colour, effects (see below) |
 
 Devices that gain new variables/functions after a firmware update get their entities automatically:
 the integration notices the change on the next poll after the device comes online and reloads itself.
@@ -42,6 +43,27 @@ A rejected token stops the stream and starts HA's re-auth flow.
 `tests/test_stream.py` drives the stream through each failure mode with a fake client:
 `<venv with homeassistant>/bin/python tests/test_stream.py`.
 
+## Lights
+
+A device that publishes `ha/light` (or `ha/light/<name>` for several) becomes a light entity:
+
+```json
+{"on": 1, "bri": 128, "rgb": "ff6a1e", "fx": "rainbow", "fxs": ["warm", "rainbow", "solid"]}
+```
+
+All fields but `on` are optional (`rgb` → colour picker, `fxs` → effect list). HA drives it through
+cloud functions: `mode("on"|"off"|<effect>)`, `brightness("0".."255")`, `color("rrggbb")`. Other names
+can be given in the payload, e.g. `"fn": {"power": "power", "fx": "effect", "bri": "level", "rgb": "rgb"}`.
+A negative return value is shown in HA as an error. The device should publish its state on every
+change, including local ones (buttons, touch), so HA follows. First user: the Particle Snowflake
+(No1089 snowflake-lights).
+
+## Resync after gaps
+
+Whenever the event stream (re)connects, the integration publishes `hass-sync`. Devices that subscribe
+to it (`HA.begin()` in `HomeAssistant.h`, or by hand) send their state again at once, so values
+published while the stream was down don't stay stale until the next change.
+
 ## Firmware helper
 
 `firmware/HomeAssistant.h` (header only, copy it into `src/`):
@@ -56,7 +78,7 @@ void loop() {
 }
 ```
 
-Each value goes out as private event `ha/<key>` with `{"v":…, "u": unit, "dc": device class,
+Call `HA.begin()` in `setup()` to answer `hass-sync`. Each value goes out as private event `ha/<key>` with `{"v":…, "u": unit, "dc": device class,
 "sc": state class, "n": name}`. A value is only sent when it changes, plus every 15 min
 (`HA.refreshSeconds`). Plain `Particle.publish("ha/key", "42")` works too; the JSON is optional.
 `firmware/example/` uses everything above (variable, function, subscribe, ha/ values).
@@ -79,5 +101,6 @@ with `ha/` events instead. The canary is published from the API, not by a device
 on an M-SoM: config flow, online sensor, variable → sensor, function → button/action with
 return value, `ha/` sensors (unit/device class/state class, restored after restart), reload on
 new variables/functions, `publish_event` → device `Particle.subscribe`, `particle_event` on the bus,
-event stream health + canary. Failure modes (zombie stream, dead socket, long outage → Repairs
+event stream health + canary. Lights: Snowflake P2 (Device OS 5.6.0): effect, brightness, colour, off/on
+from HA all matched the device's own variables; state arrives on boot and on `hass-sync`. Failure modes (zombie stream, dead socket, long outage → Repairs
 issue, revoked token) are covered by the unit tests only.

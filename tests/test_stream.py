@@ -80,8 +80,13 @@ class FakeClient:
 def make(modes):
     client = FakeClient(modes)
     seen, reconnects, auth = [], [], []
-    s = stream_mod.EventStream(None, "e1", client, lambda n, p: seen.append(n),
-                               lambda: reconnects.append(1), lambda: auth.append(1))
+    async def on_open(n):
+        if n > 1:
+            reconnects.append(1)
+
+    hass = types.SimpleNamespace(async_create_task=lambda c: asyncio.ensure_future(c))
+    s = stream_mod.EventStream(hass, "e1", client, lambda n, p: seen.append(n),
+                               on_open, lambda: auth.append(1))
     return s, client, seen, reconnects, auth
 
 

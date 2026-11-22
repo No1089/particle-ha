@@ -21,7 +21,7 @@ import logging
 import random
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -44,13 +44,13 @@ class StreamStuck(Exception):
 class EventStream:
     def __init__(self, hass: HomeAssistant, entry_id: str, client: ParticleClient,
                  on_event: Callable[[str, dict], None],
-                 on_reconnect: Callable[[], None],
+                 on_open: Callable[[int], Awaitable[None]],
                  on_auth_failed: Callable[[], None]) -> None:
         self.hass = hass
         self.entry_id = entry_id
         self.client = client
         self._on_event = on_event
-        self._on_reconnect = on_reconnect
+        self._on_open = on_open
         self._on_auth_failed = on_auth_failed
         self._nonce: str | None = None
         self._probe_back = asyncio.Event()
@@ -133,8 +133,8 @@ class EventStream:
                 self._opened.set()
                 self.connects += 1
                 _LOGGER.debug("Particle event stream open (#%s)", self.connects)
-                if self.connects > 1:
-                    self._on_reconnect()  # catch up on what the gap missed
+                # resync devices; after a reconnect also catch up on the gap
+                self.hass.async_create_task(self._on_open(self.connects))
             if not name:
                 continue  # keepalive
             self.last_event = dt_util.utcnow().isoformat()

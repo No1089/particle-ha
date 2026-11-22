@@ -25,6 +25,7 @@ void setup() {
     Particle.variable("counter", counter);
     Particle.function("led", setLed);
     Particle.subscribe("home/", fromHa);
+    HA.begin();
     HA.name("uptime", "Uptime");
 }
 

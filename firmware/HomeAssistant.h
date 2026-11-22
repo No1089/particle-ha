@@ -2,6 +2,7 @@
 // turns into sensors on its own. Header only; copy it into your project's src/.
 //
 //   #include "HomeAssistant.h"
+//   HA.begin();                                             // in setup()
 //   HA.value("temperature", 21.4, "°C", "temperature");   // -> sensor "Temperature"
 //   HA.value("door", "open");                               // -> text sensor
 //   HA.value("battery", 87, "%", "battery");
@@ -46,6 +47,10 @@ public:
 
     uint32_t refreshSeconds = 15 * 60;
 
+    // Call once in setup(): when HA's event stream (re)connects it publishes
+    // "hass-sync", and every value is sent again so HA catches up at once.
+    void begin() { Particle.subscribe("hass-sync", &HomeAssistantClass::onSync, this); }
+
     void loop() {
         if (!Particle.connected() || millis() - lastSend < 1100) return;
         Slot *pick = nullptr;
@@ -84,6 +89,10 @@ private:
     Slot slots[MAX_KEYS] = {};
     int count = 0;
     uint32_t lastSend = 0;
+
+    void onSync(const char *, const char *) {
+        for (int i = 0; i < count; i++) slots[i].dirty = true;
+    }
 
     static int decimalsOf(const char *s) {
         const char *dot = strchr(s, '.');

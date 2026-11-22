@@ -35,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
     async_add_entities(
         _make(did, key, meta)
         for did, keys in data.ha_keys.items() if did in data.device_ids
-        for key, meta in keys.items()
+        for key, meta in keys.items() if not meta.get("light")
     )
 
     @callback

@@ -33,10 +33,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .stream import EventStream
 from .api import ParticleAuthError, ParticleClient, ParticleError
 from .const import (BUS_EVENT, CONF_DEVICES, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL,
-                    DOMAIN, HA_PREFIX, SIGNAL_HA_VALUE, STORE_VERSION)
+                    DOMAIN, HA_PREFIX, SIGNAL_HA_VALUE, SIGNAL_LIGHT, STORE_VERSION,
+                    SYNC_EVENT)
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.LIGHT, Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORM_NAMES = {
@@ -167,11 +168,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> 
         if did in wanted:
             _handle_event(hass, entry, did, name, payload)
 
-    @callback
-    def _on_reconnect() -> None:
-        hass.async_create_task(coordinator.async_request_refresh())
+    async def _on_open(connects: int) -> None:
+        # Ask devices to resend their state (HomeAssistant.h answers hass-sync), so
+        # values published while the stream was down aren't lost.
+        try:
+            await client.publish(SYNC_EVENT, "", ttl=60)
+        except ParticleError as err:
+            _LOGGER.debug("hass-sync publish failed: %s", err)
+        if connects > 1:
+            await coordinator.async_request_refresh()  # online state, variables
 
-    data.stream = EventStream(hass, entry.entry_id, client, _on_event, _on_reconnect,
+    data.stream = EventStream(hass, entry.entry_id, client, _on_event, _on_open,
                               lambda: entry.async_start_reauth(hass))
     entry.async_create_background_task(hass, data.stream.run(), f"{DOMAIN} event stream")
     entry.async_on_unload(entry.add_update_listener(_options_updated))
@@ -204,8 +211,22 @@ def _handle_event(hass: HomeAssistant, entry: ParticleConfigEntry, did: str,
 
     if name.startswith(HA_PREFIX) and len(name) > len(HA_PREFIX):
         key = name[len(HA_PREFIX):]
-        value, meta = parse_ha_payload(raw)
         keys = data.ha_keys.setdefault(did, {})
+        if key == "light" or key.startswith("light/"):
+            try:
+                state = json.loads(raw or "{}")
+            except ValueError:
+                _LOGGER.warning("%s from %s is not JSON: %s", name, did, raw)
+                return
+            if not isinstance(state, dict):
+                return
+            meta = {"light": state}
+            if keys.get(key) != meta:
+                keys[key] = meta
+                data.store.async_delay_save(lambda: data.ha_keys, 5)
+            async_dispatcher_send(hass, SIGNAL_LIGHT.format(entry_id=entry.entry_id), did, key, state)
+            return
+        value, meta = parse_ha_payload(raw)
         if keys.get(key) != meta:
             keys[key] = meta
             data.store.async_delay_save(lambda: data.ha_keys, 5)

@@ -10,7 +10,8 @@ DEFAULT_POLL_INTERVAL = 300  # s; each variable read is a cloud round trip (data
 HA_PREFIX = "ha/"  # events named ha/<key> become sensors
 BUS_EVENT = "particle_event"
 SIGNAL_HA_VALUE = "particle_ha_value_{entry_id}"
-SIGNAL_ONLINE = "particle_online_{entry_id}"
+SIGNAL_LIGHT = "particle_light_{entry_id}"
+SYNC_EVENT = "hass-sync"  # published on every stream (re)connect; devices answer with their state
 
 STORE_VERSION = 1
 
