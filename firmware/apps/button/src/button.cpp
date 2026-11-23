@@ -1,10 +1,10 @@
 // A four-button controller with an LED ring, as a Home Assistant device: two or more
 // of every entity type the integration supports.
 //
-// Hardware (change the pins below to match yours): a P2 / Photon 2, Argon or Boron
-// (the neopixel library has no M-SoM support) with
+// Hardware (change the pins below to match yours): a P2 / Photon 2, M-SoM, Argon or
+// Boron with
 //   - 4 push buttons to GND on D4..D7           -> 4 events (press, double, hold)
-//   - a ring of 12 WS2812B LEDs: data on MOSI (P2 / Photon 2) or D3 (Argon, Boron)
+//   - a ring of 12 WS2812B LEDs: data on MOSI (P2 / Photon 2, M-SoM) or D3 (Argon, Boron)
 //                                               -> light "Ring" with effects
 //   - the onboard RGB status LED                -> light "Status"
 //   - a piezo buzzer on D2 (optional)           -> switch "Chime": beep on presses
@@ -33,8 +33,9 @@ static const pin_t BUZZER_PIN = D2;
 static const pin_t DOOR_PIN = A0;    // contact to GND: closed = LOW = door shut
 static const pin_t MOTION_PIN = A1;  // PIR output, HIGH = motion
 static const uint16_t RING_LEDS = 12;
-#if PLATFORM_ID == PLATFORM_P2
-static Adafruit_NeoPixel ring(RING_LEDS, SPI, WS2812B);  // P2 / Photon 2: data on MOSI
+// lib/neopixel is the neopixel library patched for every RTL872x platform (see PATCHED.md).
+#if HAL_PLATFORM_RTL872X
+static Adafruit_NeoPixel ring(RING_LEDS, SPI, WS2812B);  // P2 / Photon 2, M-SoM: data on MOSI
 #else
 static Adafruit_NeoPixel ring(RING_LEDS, D3, WS2812B);   // Argon, Boron: data on D3
 #endif

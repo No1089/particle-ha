@@ -166,10 +166,14 @@ Complete apps in `firmware/apps/` (copy `HomeAssistant.h` into the app's `src/`,
 
 | App | What it shows | Builds for |
 |---|---|---|
-| `button` | A four-button controller with an LED ring: 4 event entities (press, double, hold), 2 lights (a WS2812B ring with 4 effects, and the onboard RGB LED), 2 switches (chime, night mode), 2 binary sensors (door contact, PIR motion), 2 numbers (hold time, ring auto-off), temperature and humidity from an SHT4x | P2 / Photon 2, Argon, Boron |
+| `button` | A four-button controller with an LED ring: 4 event entities (press, double, hold), 2 lights (a WS2812B ring with 4 effects, and the onboard RGB LED), 2 switches (chime, night mode), 2 binary sensors (door contact, PIR motion), 2 numbers (hold time, ring auto-off), temperature and humidity from an SHT4x | P2 / Photon 2, M-SoM, Argon, Boron |
 | `climate` | Temperature, humidity and dew point from an SHT40/41/45 on I2C, with a number for the measuring interval | any |
 | `light` | The onboard RGB status LED as a light with 4 effects; no extra hardware | any |
 | `basics` | `Particle.variable`, `Particle.function`, `Particle.subscribe` and `ha/` values | any |
+
+`apps/button` includes `lib/neopixel`: the `neopixel` library 1.0.4 (LGPL-3.0) with its RTL872x
+code enabled for every RTL872x platform instead of only the P2, which adds the M-SoM (details in its
+`PATCHED.md`).
 
 (The folder is `apps`, not `examples`: the Particle CLI treats a folder with an `examples/`
 subfolder as a library and refuses to compile the projects inside.)
@@ -261,10 +265,10 @@ November 2026:
 - **Entities** (`pytest`, test Home Assistant with a fake cloud): switches, binary sensors, numbers,
   events (announce, then trigger), lights and the Pattern select through the `ha` function, sensors,
   `hass-sync`, a rejected command raising an error, entities re-created after a reload.
-- **Firmware**: `apps/light` on an M-SoM: the light announces itself, `ha` commands change the LED
-  and publish the new state, `hass-sync` gets an answer, bad commands return -1. All apps build for
-  their listed platforms (Device OS 6.3.0); `apps/button` and `apps/climate` haven't run on their
-  hardware yet.
+- **Firmware**: `apps/light` and `apps/button` on an M-SoM: all entities announce themselves, `ha`
+  commands change state and publish it, `hass-sync` gets an answer, bad or out-of-range commands
+  return -1. All apps build for their listed platforms (Device OS 6.3.0). Not run with the real
+  hardware attached yet: the button app's ring, buttons and SHT4x, and `apps/climate`.
 - **Not run yet**: actually moving or importing a device into a product, creating a product, the
   development-device flag.
 
