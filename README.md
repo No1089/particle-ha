@@ -235,7 +235,7 @@ not by devices; `hass-sync` reaches only devices that subscribe to it.
   the commands sent back, rejected commands, entities surviving a reload), and
   `python tests/check_stream.py` drives the event stream through its failure modes. CI
   (`.github/workflows/validate.yml`) runs both, plus `hassfest` and the HACS validator.
-- Releases: bump `version` in `manifest.json`, tag `vX.Y.Z`, publish a GitHub release; HACS offers it
+- Releases: bump `version` in `manifest.json`, tag `vX.Y.Z`, publish a GitHub release; the Marketplace offers it
   as an update.
 - Copying straight to a Home Assistant OS box during development:
 
