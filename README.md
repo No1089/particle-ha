@@ -194,6 +194,9 @@ A light can also use separate functions instead of `ha`: publish `ha/light` with
 Assistant calls `mode("on" | "off" | <effect>)`, `brightness("0".."255")` and `color("rrggbb")` (names
 can be changed with `"fn": {"power": …, "fx": …, "bri": …, "rgb": …}`).
 
+A real-world example is [particle-snowflake-lights](https://github.com/No1089/particle-snowflake-lights),
+firmware for the Particle Snowflake that shows up as a light with eight patterns and colour tints.
+
 With an effect list, a light also gets a **Pattern** select: HomeKit has no light effects, but Home
 Assistant's HomeKit bridge shows a select as one switch per option, so patterns can be picked in the
 Home app, in scenes and with Siri.

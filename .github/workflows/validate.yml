@@ -15,16 +15,11 @@ jobs:
       - uses: home-assistant/actions/hassfest@master
 
   hacs:
-    # The HACS validator only works on public repositories.
-    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       - uses: hacs/action@main
         with:
           category: integration
-          # Checks that need the repo to be public (topics, description shown in HACS) are
-          # skipped until it is published.
-          ignore: brands topics
 
   tests:
     runs-on: ubuntu-latest
