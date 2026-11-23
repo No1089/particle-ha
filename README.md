@@ -2,7 +2,7 @@
 
 <img src="custom_components/particle/brand/icon.png" width="64" align="right" alt="">
 
-[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=No1089&repository=particle-ha&category=integration)
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=No1089&repository=particle-ha&category=integration)
 [![Open your Home Assistant instance and start setting up Particle.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=particle)
 
 A Home Assistant integration for Particle devices (Photon 2, P2, M-SoM, Boron, Argon, …) through the
@@ -32,10 +32,11 @@ notices the change after the device comes back online and reloads.
 
 ## Install
 
-**HACS** (recommended): click *Open in HACS* above, or in HACS add `https://github.com/No1089/particle-ha`
-as a custom repository (type *Integration*). Download it, restart Home Assistant, then click *Add
-integration* above or go to *Settings → Devices & services → Add integration → Particle*. HACS offers
-updates like any other integration.
+**Marketplace** (recommended): Home Assistant 2026.11 has HACS built in as *Settings → Marketplace*.
+Click the first button above, or in the Marketplace use *Add from link* with `No1089/particle-ha`
+(adding a repository by link asks you to connect a GitHub account once). Install it, then click *Add
+integration* above or go to *Settings → Devices & services → Add integration → Particle*. Updates
+appear under *Settings → Updates* like any other.
 
 **Manual**: copy `custom_components/particle` into your Home Assistant `config/custom_components/`
 folder and restart.
