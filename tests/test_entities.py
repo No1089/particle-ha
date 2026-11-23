@@ -179,3 +179,32 @@ async def test_entities_survive_a_reload(hass, cloud):
     # Re-created from storage before the device says anything; the switch keeps its state.
     assert hass.states.get("switch.desk_night_mode").state == "on"
     assert hass.states.get("event.desk_button_2") is not None
+
+
+async def test_button(hass, cloud):
+    await cloud.device_publish("ha/button/identify", {"n": "Identify", "cmd": "ha"})
+    await flush(hass)
+    assert hass.states.get("button.desk_identify") is not None
+    await hass.services.async_call("button", "press", {"entity_id": "button.desk_identify"}, blocking=True)
+    assert cloud.calls[-1] == (DEV, "ha", "button/identify=press")
+
+
+async def test_old_function_buttons_are_removed(hass):
+    """Before 0.5 every cloud function got a button; setting up removes those."""
+    from homeassistant.helpers import entity_registry as er
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="Old", unique_id="product_2",
+        data={"access_token": "t", "product_id": 2, "product_name": "Old", "product_slug": "old",
+              "api_user": "ha+y@api.particle.io"},
+        options={"devices": [DEV], "poll_interval": 300})
+    entry.add_to_hass(hass)
+    reg = er.async_get(hass)
+    old = reg.async_get_or_create("button", DOMAIN, f"{DEV}_fn_brightness", config_entry=entry,
+                                  suggested_object_id="desk_brightness")
+    fake = FakeCloud()
+    with patch("custom_components.particle.ParticleClient", return_value=fake):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await flush(hass)
+        assert reg.async_get(old.entity_id) is None
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()

@@ -9,6 +9,7 @@
 //       HA.addBinary("door", "Door", "door", false);              // binary_sensor.<device>_door
 //       HA.addNumber("hold", "Hold time", 0.3, 3, 0.1, 1, "s", onNumber);  // number.<device>_hold_time
 //       HA.addEvent("button1", "Button 1", PRESS_TYPES, 3);       // event.<device>_button_1
+//       HA.addButton("restart", "Restart", onButton);             // button.<device>_restart
 //       HA.begin();
 //   }
 //   void loop() {
@@ -25,6 +26,7 @@
 //   ha/binary/<key>     binary sensor   HA.addBinary()
 //   ha/number/<key>     number          HA.addNumber()
 //   ha/event/<key>      event           HA.addEvent() + HA.event()
+//   ha/button/<key>     button          HA.addButton()
 //
 // Commands from Home Assistant all arrive through ONE cloud function, "ha", with the
 // argument "<kind>/<key>=<value>" (lights: "light/<key>/<field>=<value>", field is
@@ -50,11 +52,12 @@ struct HALight {
 typedef void (*HALightHandler)(const char *key, const HALight &light);
 typedef void (*HASwitchHandler)(const char *key, bool on);
 typedef void (*HANumberHandler)(const char *key, float value);
+typedef void (*HAButtonHandler)(const char *key);
 
 class HomeAssistantClass {
 public:
     static const int MAX_VALUES = 16;    // ha/<key> sensors
-    static const int MAX_ENTITIES = 20;  // lights, switches, binary sensors, numbers, events
+    static const int MAX_ENTITIES = 20;  // lights, switches, binary sensors, numbers, events, buttons
     uint32_t refreshSeconds = 15 * 60;
 
     // ---- declare (in setup(), before begin()) -----------------------------------------
@@ -100,6 +103,13 @@ public:
         if (!e) return;
         e->list = types;
         e->listCount = typeCount;
+    }
+
+    // A button in Home Assistant; onPress runs when it's pressed there.
+    void addButton(const char *key, const char *name, HAButtonHandler onPress) {
+        Entity *e = add(BUTTON, key, name);
+        if (!e) return;
+        e->cb = (void *)onPress;
     }
 
     // ---- update from the app ------------------------------------------------------------
@@ -148,7 +158,7 @@ public:
         Particle.subscribe("hass-sync", &HomeAssistantClass::onSync, this);
         for (int i = 0; i < entityCount; i++) {
             Kind k = entities[i].kind;
-            if (k == LIGHT || k == SWITCH || k == NUMBER) {
+            if (k == LIGHT || k == SWITCH || k == NUMBER || k == BUTTON) {
                 Particle.function("ha", &HomeAssistantClass::onCommand, this);
                 break;
             }
@@ -182,9 +192,9 @@ public:
     }
 
 private:
-    enum Kind : uint8_t { LIGHT, SWITCH, BINARY, NUMBER, EVENT };
+    enum Kind : uint8_t { LIGHT, SWITCH, BINARY, NUMBER, EVENT, BUTTON };
     static const char *kindName(Kind k) {
-        static const char *const names[] = {"light", "switch", "binary", "number", "event"};
+        static const char *const names[] = {"light", "switch", "binary", "number", "event", "button"};
         return names[k];
     }
 
@@ -264,6 +274,12 @@ private:
             e->dirty = true;
             if (e->cb) ((HASwitchHandler)e->cb)(e->key, e->on);
             return on;
+        }
+        if (kind == "button") {
+            Entity *e = find(BUTTON, rest.c_str());
+            if (!e || val != "press") return -1;
+            if (e->cb) ((HAButtonHandler)e->cb)(e->key);
+            return 0;
         }
         if (kind == "number") {
             Entity *e = find(NUMBER, rest.c_str());
@@ -361,6 +377,9 @@ private:
                 w.name("max").value((double)e.max);
                 w.name("step").value((double)e.step);
                 if (e.unit) w.name("u").value(e.unit);
+                w.name("cmd").value("ha");
+                break;
+            case BUTTON:
                 w.name("cmd").value("ha");
                 break;
             case EVENT:

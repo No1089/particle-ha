@@ -1,11 +1,12 @@
 """Particle Cloud integration for Home Assistant.
 
 - Every selected device becomes an HA device with an "online" sensor.
-- Cloud variables become sensors (polled), cloud functions become buttons and the
+- Cloud variables become sensors (polled); cloud functions are called with the
   particle.call_function action.
-- Events from the devices arrive live over the Particle SSE stream (no inbound
+- Events from the devices arrive live over the product's event stream (no inbound
   webhook needed) and are fired on the HA bus as `particle_event`.
-- Events named `ha/<key>` become sensors on their own (see firmware/HomeAssistant.h).
+- Events named `ha/<key>` and `ha/<kind>/<key>` become sensors, lights, switches,
+  binary sensors, numbers, events and buttons (see firmware/HomeAssistant.h).
 """
 from __future__ import annotations
 
@@ -179,6 +180,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ParticleConfigEntry) -> 
             configuration_url=f"https://console.particle.io/devices/{did}",
         )
 
+    _remove_function_buttons(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     wanted = set(device_ids)
 
@@ -262,6 +264,16 @@ def _handle_event(hass: HomeAssistant, entry: ParticleConfigEntry, did: str,
             data.store.async_delay_save(lambda: data.ha_keys, 5)
         async_dispatcher_send(hass, SIGNAL_HA_VALUE.format(entry_id=entry.entry_id),
                               did, key, value, meta)
+
+
+@callback
+def _remove_function_buttons(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Versions before 0.5 made a button per cloud function; drop those registry entries."""
+    from homeassistant.helpers import entity_registry as er
+    reg = er.async_get(hass)
+    for ent in er.async_entries_for_config_entry(reg, entry.entry_id):
+        if ent.domain == "button" and "_fn_" in ent.unique_id:
+            reg.async_remove(ent.entity_id)
 
 
 def _console_url(entry: ConfigEntry) -> str:

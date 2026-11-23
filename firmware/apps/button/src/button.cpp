@@ -14,6 +14,8 @@
 //   -                                           -> number "Hold time" (when a press is a hold)
 //   -                                           -> number "Auto off" (ring off after N minutes)
 //   - an SHT40/41/45 on I2C (SDA/SCL), optional -> sensors "Temperature", "Humidity"
+//   -                                           -> button "Beep": sound the buzzer
+//   -                                           -> button "Identify": flash the ring white
 //
 // In Home Assistant the buttons are event entities: use them as automation triggers
 // ("Button 1 · hold"). Everything is declared in setup(); HomeAssistant.h does the rest.
@@ -56,6 +58,13 @@ static void onLight(const char *key, const HALight &l) {
 }
 static void onSwitch(const char *key, bool on) { Log.info("switch %s: %s", key, on ? "on" : "off"); }
 static void onNumber(const char *key, float v) { Log.info("number %s: %.2f", key, v); }
+
+static uint32_t identifyUntil = 0;
+static void onButton(const char *key) {
+    Log.info("button %s pressed in Home Assistant", key);
+    if (!strcmp(key, "beep")) tone(BUZZER_PIN, 2700, 200);
+    if (!strcmp(key, "identify")) identifyUntil = millis() + 3000;
+}
 
 // ---- SHT4x (temperature + humidity), no library needed -----------------------------------
 static bool readSht4x(float &tempC, float &rh) {
@@ -131,6 +140,13 @@ static void drawRing() {
     uint8_t level = l.on ? l.brightness : 0;
     if (HA.switchState("night")) level = level / 8;
     uint8_t r = l.rgb >> 16, g = l.rgb >> 8, b = l.rgb;
+    if (t < identifyUntil) {  // "Identify": blink white, whatever the light is doing
+        bool on = (t / 250) % 2;
+        for (uint16_t i = 0; i < RING_LEDS; i++) ring.setPixelColor(i, on ? ring.Color(255, 255, 255) : 0);
+        ring.setBrightness(160);
+        ring.show();
+        return;
+    }
     for (uint16_t i = 0; i < RING_LEDS; i++) {
         uint32_t c = ring.Color(r, g, b);
         switch (l.effect) {
@@ -188,6 +204,8 @@ void setup() {
     HA.addNumber("hold_time", "Hold time", 0.3, 3, 0.1, 0.8, "s", onNumber);
     HA.addNumber("auto_off", "Auto off", 0, 120, 1, 0, "min", onNumber);
     for (int i = 0; i < 4; i++) HA.addEvent(BUTTON_KEYS[i], BUTTON_NAMES[i], PRESS_TYPES, 3);
+    HA.addButton("beep", "Beep", onButton);
+    HA.addButton("identify", "Identify", onButton);
     HA.begin();
     ringOnSince = millis();
 }

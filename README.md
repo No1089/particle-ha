@@ -19,8 +19,9 @@ login is never stored.
 | `HA.addBinary(...)` | binary sensors: door, window, motion, leak, … |
 | `HA.addNumber(...)` | numbers (sliders/boxes) for setpoints and settings |
 | `HA.addEvent(...)` + `HA.event(...)` | event entities: button presses as automation triggers |
+| `HA.addButton(...)` | buttons that run something on the device |
 | `Particle.variable(…)` | sensors, read every *poll interval* |
-| `Particle.function(…)` | action `particle.call_function` (returns the int), and a button (disabled by default) |
+| `Particle.function(…)` | action `particle.call_function` (any argument; returns the int) |
 | any other `Particle.publish(…)` | `particle_event` on the event bus, for automations |
 | `Particle.subscribe(…)` | action `particle.publish_event` sends events to the devices |
 
@@ -127,6 +128,7 @@ void setup() {
     HA.addBinary("door", "Door", "door", false);
     HA.addNumber("setpoint", "Setpoint", 5, 30, 0.5, 21, "°C", onNumber);
     HA.addEvent("button1", "Button 1", PRESSES, 3);
+    HA.addButton("identify", "Identify", onButton);   // onButton(const char *key)
     HA.begin();
 }
 
@@ -139,8 +141,8 @@ void loop() {
 ```
 
 In Home Assistant these show up on the device as `light.<device>_ring`, `switch.<device>_relay`,
-`binary_sensor.<device>_door`, `number.<device>_setpoint`, `event.<device>_button_1` and
-`sensor.<device>_temperature`. After a local change (a button toggling the relay), call the matching
+`binary_sensor.<device>_door`, `number.<device>_setpoint`, `event.<device>_button_1`,
+`button.<device>_identify` and `sensor.<device>_temperature`. After a local change (a button toggling the relay), call the matching
 `HA.set…()` (or change `HA.light(key)` and call `HA.lightChanged(key)`) so Home Assistant follows.
 
 How it works:
@@ -166,7 +168,7 @@ Complete apps in `firmware/apps/` (copy `HomeAssistant.h` into the app's `src/`,
 
 | App | What it shows | Builds for |
 |---|---|---|
-| `button` | A four-button controller with an LED ring: 4 event entities (press, double, hold), 2 lights (a WS2812B ring with 4 effects, and the onboard RGB LED), 2 switches (chime, night mode), 2 binary sensors (door contact, PIR motion), 2 numbers (hold time, ring auto-off), temperature and humidity from an SHT4x | P2 / Photon 2, M-SoM, Argon, Boron |
+| `button` | A four-button controller with an LED ring: 4 event entities (press, double, hold), 2 lights (a WS2812B ring with 4 effects, and the onboard RGB LED), 2 switches (chime, night mode), 2 binary sensors (door contact, PIR motion), 2 numbers (hold time, ring auto-off), 2 buttons (beep, identify), temperature and humidity from an SHT4x | P2 / Photon 2, M-SoM, Argon, Boron |
 | `climate` | Temperature, humidity and dew point from an SHT40/41/45 on I2C, with a number for the measuring interval | any |
 | `light` | The onboard RGB status LED as a light with 4 effects; no extra hardware | any |
 | `basics` | `Particle.variable`, `Particle.function`, `Particle.subscribe` and `ha/` values | any |
@@ -184,7 +186,8 @@ The protocol is plain events and one function, so any firmware can speak it: pub
 with a value or `{"v": 21.4, "u": "°C", "dc": "temperature", "sc": "measurement", "n": "Room"}` for
 a sensor; `ha/switch/<key>` and `ha/binary/<key>` with `{"on": 0|1, "n": …, "dc": …}`;
 `ha/number/<key>` with `{"v", "min", "max", "step", "u"}`; `ha/event/<key>` with `{"t": "press",
-"ts": ["press", …]}`; `ha/light/<key>` with `{"on", "bri", "rgb", "fx", "fxs"}`. Add `"cmd": "ha"`
+"ts": ["press", …]}`; `ha/button/<key>` with `{"n": …}` (a press sends `button/<key>=press`);
+`ha/light/<key>` with `{"on", "bri", "rgb", "fx", "fxs"}`. Add `"cmd": "ha"`
 to the commandable ones and implement that function.
 
 A light can also use separate functions instead of `ha`: publish `ha/light` without `cmd`, and Home
@@ -263,7 +266,7 @@ November 2026:
 - **Failure modes** (dead connection, zombie stream, long outage and Repairs issue, rejected token):
   unit tests with a fake client.
 - **Entities** (`pytest`, test Home Assistant with a fake cloud): switches, binary sensors, numbers,
-  events (announce, then trigger), lights and the Pattern select through the `ha` function, sensors,
+  events (announce, then trigger), buttons, removal of the per-function buttons older versions made, lights and the Pattern select through the `ha` function, sensors,
   `hass-sync`, a rejected command raising an error, entities re-created after a reload.
 - **Firmware**: `apps/light` and `apps/button` on an M-SoM: all entities announce themselves, `ha`
   commands change state and publish it, `hass-sync` gets an answer, bad or out-of-range commands

@@ -1,46 +1,22 @@
-"""A button per cloud function (called with an empty argument).
+"""Buttons a device declares: ha/button/<key> with {"n": name}; a press sends
+"button/<key>=press" to the device's command function (HomeAssistant.h: HA.addButton).
 
-Disabled by default: many functions need an argument, and an empty one can do the
-wrong thing (e.g. brightness("") -> 0). Enable the ones that make sense; for
-arguments use the particle.call_function action.
+Cloud functions don't get buttons of their own: most take an argument, and an empty
+one can do the wrong thing. Call them with the particle.call_function action instead.
 """
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import ParticleError
-from .entity import ParticleEntity
+from .push import PushEntity, setup_push_platform
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback) -> None:
-    data = entry.runtime_data
-    async_add_entities(
-        ParticleFunctionButton(data.coordinator, data.client, did, fn)
-        for did, d in data.coordinator.data.items()
-        for fn in d["info"].get("functions") or []
-    )
+    setup_push_platform(hass, entry, async_add_entities, "button", ParticleButton)
 
 
-class ParticleFunctionButton(ParticleEntity, ButtonEntity):
-    def __init__(self, coordinator, client, device_id: str, function: str) -> None:
-        super().__init__(coordinator, device_id, f"fn_{function}")
-        self._client = client
-        self._function = function
-        self._attr_name = function
-        self._attr_icon = "mdi:function-variant"
-        self._attr_entity_registry_enabled_default = False
-
-    @property
-    def available(self) -> bool:
-        return super().available and self.online
-
+class ParticleButton(PushEntity, ButtonEntity):
     async def async_press(self) -> None:
-        try:
-            rv = await self._client.call(self.device_id, self._function, "")
-        except ParticleError as err:
-            raise HomeAssistantError(str(err)) from err
-        self._attr_extra_state_attributes = {"last_return_value": rv}
-        self.async_write_ha_state()
+        await self.command("press")

@@ -21,8 +21,8 @@ HA_PREFIX = "ha/"  # events named ha/<key> become sensors
 BUS_EVENT = "particle_event"
 SIGNAL_HA_VALUE = "particle_ha_value_{entry_id}"
 SIGNAL_LIGHT = "particle_light_{entry_id}"
-SIGNAL_ENTITY = "particle_entity_{entry_id}"  # ha/switch|binary|number|event/<key>
-ENTITY_KINDS = ("switch", "binary", "number", "event")
+SIGNAL_ENTITY = "particle_entity_{entry_id}"  # ha/switch|binary|number|event|button/<key>
+ENTITY_KINDS = ("switch", "binary", "number", "event", "button")
 DEFAULT_CMD = "ha"  # the helper's single command function
 SYNC_EVENT = "hass-sync"  # published on every stream (re)connect; devices answer with their state
 
