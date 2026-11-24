@@ -220,7 +220,7 @@ void loop() {
         drawRing();
         drawStatus();
     }
-    if (millis() - lastClimate >= 30000 || lastClimate == 0) {
+    if (millis() - lastClimate >= 5 * 60000 || lastClimate == 0) {  // one ha/batch per 5 min
         lastClimate = millis();
         float t, rh;
         if (readSht4x(t, rh)) {

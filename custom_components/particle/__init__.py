@@ -258,12 +258,31 @@ def _handle_event(hass: HomeAssistant, entry: ParticleConfigEntry, did: str,
                 data.store.async_delay_save(lambda: data.ha_keys, 5)
             async_dispatcher_send(hass, SIGNAL_ENTITY.format(entry_id=entry.entry_id), did, kind, key, state)
             return
-        value, meta = parse_ha_payload(raw)
-        if keys.get(key) != meta:
-            keys[key] = meta
-            data.store.async_delay_save(lambda: data.ha_keys, 5)
-        async_dispatcher_send(hass, SIGNAL_HA_VALUE.format(entry_id=entry.entry_id),
-                              did, key, value, meta)
+        if key == "batch":
+            # Several sensors in one publish (one Data Operation): {"<key>": value or {"v": …, "u": …}}
+            try:
+                batch = json.loads(raw or "{}")
+            except ValueError:
+                _LOGGER.warning("ha/batch from %s is not JSON: %s", did, raw)
+                return
+            if isinstance(batch, dict):
+                for k, v in batch.items():
+                    if isinstance(k, str) and k and "/" not in k:
+                        _sensor_value(hass, entry, did, k, json.dumps(v) if isinstance(v, dict) else str(v))
+            return
+        _sensor_value(hass, entry, did, key, raw)
+
+
+@callback
+def _sensor_value(hass: HomeAssistant, entry: ParticleConfigEntry, did: str, key: str, raw: str | None) -> None:
+    data = entry.runtime_data
+    keys = data.ha_keys.setdefault(did, {})
+    value, meta = parse_ha_payload(raw)
+    if keys.get(key) != meta:
+        keys[key] = meta
+        data.store.async_delay_save(lambda: data.ha_keys, 5)
+    async_dispatcher_send(hass, SIGNAL_HA_VALUE.format(entry_id=entry.entry_id),
+                          did, key, value, meta)
 
 
 @callback

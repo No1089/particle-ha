@@ -18,7 +18,7 @@
       },
       "device": {
         "title": "Device",
-        "description": "Pick a device ({count} on the account). The next step asks which product it should be in. More devices of the same product can be added later under Configure.",
+        "description": "{count} of {total} devices match. Pick one; the next step asks which product it should be in. More devices of the same product can be added later under Configure.",
         "data": {
           "device": "Device"
         }
@@ -30,6 +30,15 @@
           "product": "Product",
           "name": "Name for a new product"
         }
+      },
+      "find": {
+        "title": "Find a device",
+        "description": "The account has {count} devices. Narrow the list down: pick a platform, and search by name or device ID (any part, e.g. its last few characters).",
+        "data": {
+          "platform": "Platform",
+          "search": "Name or device ID contains",
+          "online": "Online devices only"
+        }
       }
     },
     "error": {
@@ -39,7 +48,8 @@
       "not_product_admin": "That device is in a product you can't manage with this login. Pick another device.",
       "product_failed": "Particle refused the product step (see below).",
       "name_required": "Give the new product a name.",
-      "incompatible_product": "That product is for another platform; pick one made for this device's platform."
+      "incompatible_product": "That product is for another platform; pick one made for this device's platform.",
+      "no_match": "No device matches. Try another platform or a shorter search."
     },
     "abort": {
       "already_configured": "This product is already set up and already has this device.",
@@ -61,10 +71,11 @@
       },
       "devices": {
         "title": "Devices in {product}",
-        "description": "Pick the devices Home Assistant should see. Cloud variables are read every poll interval (a cloud round trip each, which uses data on cellular devices); prefer `ha/` events for live values.",
+        "description": "Showing {shown} of {total} devices in {product} (devices you picked always stay listed). To narrow the list, type in Search and submit; submit again without changing it to save. Each variable read is a Particle Data Operation, so keep the poll interval long (an hour or more) and use `ha/` events for live values.",
         "data": {
           "devices": "Devices",
-          "poll_interval": "Variable poll interval"
+          "poll_interval": "Variable poll interval",
+          "search": "Search (name or device ID)"
         }
       },
       "login": {

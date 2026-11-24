@@ -56,7 +56,9 @@ Home Assistant:
 
 1. **Log in** with your Particle email and password, and the code from your authenticator if your
    account has two-step verification. This creates a **login token** that lives at most an hour.
-2. **Pick a device**, then its **product**. Home Assistant's access is scoped to a product, so:
+2. **Find and pick a device.** Narrow the account's devices down by platform (e.g. only P2 / Photon 2),
+   by name or device ID (any part of either), and to online devices only; then pick one from the
+   matches. Then choose its **product**. Home Assistant's access is scoped to a product, so:
    - a device that's already in a product can stay there (the default), or move to another product
      of the same platform, existing or new: it's removed from the old product and added to the new one;
    - a sandbox (developer) device is added to a product of its platform, existing or new.
@@ -90,7 +92,8 @@ Each product is one entry in Home Assistant, with one API user.
 ## Adding devices
 
 - **A device in a product that's already set up**: *Configure → Devices*, tick it. No login
-  needed: the API user can list its own product's devices.
+  needed: the API user can list its own product's devices. With many devices, type part of a name or
+  device ID in *Search* and submit to narrow the list (devices already picked always stay listed).
 - **A device that isn't in that product yet** (or a sandbox device): *Add entry* runs the setup
   above. Pick the product that's already set up and the device is added to that entry; no second API
   user is created.
@@ -160,11 +163,16 @@ How it works:
   value, updates the state, calls your handler and publishes the new state. Anything it can't apply
   returns -1, which Home Assistant shows as an error. One function for everything keeps a device
   well inside Particle's limit on cloud functions.
+- Sensor readings (`HA.value()`) are sent together: everything pending goes out as one `ha/batch`
+  publish, so temperature, humidity and battery cost one Data Operation, not three.
 - Publishes are queued and sent at Particle's rate of about one a second, events first. A state is
-  only resent when it changes, every 15 minutes (`HA.refreshSeconds`), and when Home Assistant
+  only resent when it changes, every 6 hours (`HA.refreshSeconds`), and when Home Assistant
   publishes `hass-sync` (whenever its event stream reconnects), so it catches up after outages.
 - Event entities are announced at boot, so they can be picked as automation triggers before the
   first press.
+- `HA.maxPublishesPerDay` caps a device's publishes (see [Data Operations](#data-operations)).
+- `HA.pending()` is true while something waits to be sent; a sleepy device calls `HA.loop()` until
+  it's false, then sleeps (`firmware/apps/outdoor`).
 - Up to 20 entities and 16 sensors per device (`MAX_ENTITIES`, `MAX_VALUES`).
 
 ### Apps
@@ -175,7 +183,8 @@ Complete apps in `firmware/apps/` (copy `HomeAssistant.h` into the app's `src/`,
 | App | What it shows | Builds for |
 |---|---|---|
 | `button` | A four-button controller with an LED ring: 4 event entities (press, double, hold), 2 lights (a WS2812B ring with 4 effects, and the onboard RGB LED), 2 switches (chime, night mode), 2 binary sensors (door contact, PIR motion), 2 numbers (hold time, ring auto-off), 2 buttons (beep, identify), temperature and humidity from an SHT4x | P2 / Photon 2, M-SoM, Argon, Boron |
-| `climate` | Temperature, humidity and dew point from an SHT40/41/45 on I2C, with a number for the measuring interval | any |
+| `outdoor` | **Cellular, on a battery:** temperature, humidity, dew point, battery and signal from an SHT4x. Wakes every 15 minutes, sends one `ha/batch` publish (96 Data Operations a day), sleeps with the modem in network standby | Boron, B-SoM, M-SoM |
+| `climate` | Temperature, humidity and dew point from an SHT40/41/45 on I2C, with a number for the measuring interval (default 5 minutes) | any |
 | `light` | The onboard RGB status LED as a light with 4 effects; no extra hardware | any |
 | `basics` | `Particle.variable`, `Particle.function`, `Particle.subscribe` and `ha/` values | any |
 
@@ -226,12 +235,38 @@ stays down for 15 minutes, a Repairs issue appears, and it clears itself on reco
 `binary_sensor.particle_cloud_event_stream` shows the health, with attributes `connects`,
 `last_probe_ok`, `last_probe_ms` (the canary's round trip) and `last_error`.
 
-## Costs
+## Data Operations
 
-Each variable read is a cloud round trip; it counts as a data operation and uses data on cellular
-devices. With many variables on cellular devices, raise the poll interval (*Configure → Devices*) and
-push values as `ha/` events instead. `hass-ping` and `hass-sync` are published from the cloud API,
-not by devices; `hass-sync` reaches only devices that subscribe to it.
+Particle counts **Data Operations**: every publish from a device, every function call and variable
+read, and every event delivered to a device that subscribed to it. The free plan includes
+**100,000 a month for the whole account**, about **3,300 a day** shared by all its devices, plus
+100 MB of cellular data a month. What this integration costs:
+
+| What | Data Operations |
+|---|---|
+| a device publishing a state change or a `ha/batch` of readings | 1 per publish |
+| reading a cloud variable (every *poll interval*, default 1 hour) | 1 per variable per poll: 24 a day each |
+| Home Assistant calling a function (a light change, a switch, `particle.call_function`) | 1 per call |
+| `hass-sync` when the integration's event stream (re)connects | 1 per subscribed device, plus its answer: 1 per entity + 1 batch |
+| `hass-ping` (stream health check every 5 minutes) | published from the cloud API; devices don't subscribe to it |
+| the helper's refresh of every entity (`HA.refreshSeconds`, 6 hours) | 4 per entity per day |
+
+**A day's estimate for one device**: readings per day (in batches) + state changes + 4 × entities +
+24 × polled variables + commands from Home Assistant. Examples:
+
+| Device | Per day | Per month |
+|---|---|---|
+| `apps/outdoor`, a reading every 15 minutes | ~100 | ~3,000 |
+| `apps/climate`, every 5 minutes (its default) | ~290 | ~8,800 |
+| `apps/button`: readings every 5 minutes, 16 entities, 30 presses and changes a day | ~380 | ~11,500 |
+| a light with 4 polled variables, 20 changes a day | ~140 | ~4,200 |
+
+To keep within the plan: batch readings (the helper does), report as often as the value is useful
+rather than as often as it changes, keep the poll interval long and drop variables you don't need,
+and cap a device with `HA.maxPublishesPerDay` (e.g. `HA.maxPublishesPerDay = 500;`). The cap spreads
+publishes evenly over the day; over it, states wait and only their latest value is sent, and events
+queue. On cellular, also count data: each publish and each wake that reconnects uses some, so fewer,
+batched publishes help both.
 
 ## Development
 
@@ -277,10 +312,14 @@ November 2026:
 - **Entities** (`pytest`, test Home Assistant with a fake cloud): switches, binary sensors, numbers,
   events (announce, then trigger), buttons, removal of the per-function buttons older versions made, lights and the Pattern select through the `ha` function, sensors,
   `hass-sync`, a rejected command raising an error, entities re-created after a reload.
-- **Firmware**: `apps/light` and `apps/button` on an M-SoM: all entities announce themselves, `ha`
+- **Find and search**: the device filter (platform, name, ID, online) in a unit test; `ha/batch`
+  readings in the test Home Assistant.
+- **Firmware**: `apps/basics` on an M-SoM sends its readings as one `ha/batch` per change.
+  `apps/light` and `apps/button` on an M-SoM: all entities announce themselves, `ha`
   commands change state and publish it, `hass-sync` gets an answer, bad or out-of-range commands
-  return -1. All apps build for their listed platforms (Device OS 6.3.0). Not run with the real
-  hardware attached yet: the button app's ring, buttons and SHT4x, and `apps/climate`.
+  return -1. All apps build for their listed platforms (Device OS 6.3.0). Not run with their
+  hardware yet: the button app's ring, buttons and SHT4x, `apps/climate`, and `apps/outdoor`
+  (sleep and cellular); `HA.maxPublishesPerDay` is checked by the build only.
 - **Not run yet**: actually moving or importing a device into a product, creating a product, the
   development-device flag.
 

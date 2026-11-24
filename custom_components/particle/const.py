@@ -15,7 +15,7 @@ PLATFORM_NAMES = {
     28: "Tracker M", 32: "P2 / Photon 2", 35: "M-SoM",
 }
 CONF_POLL_INTERVAL = "poll_interval"
-DEFAULT_POLL_INTERVAL = 300  # s; each variable read is a cloud round trip (data on cellular)
+DEFAULT_POLL_INTERVAL = 3600  # s; each variable read is a Particle Data Operation (and data on cellular)
 
 HA_PREFIX = "ha/"  # events named ha/<key> become sensors
 BUS_EVENT = "particle_event"

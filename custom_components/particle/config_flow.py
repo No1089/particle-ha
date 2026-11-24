@@ -36,6 +36,8 @@ from .const import (CONF_API_USER, CONF_DEVICES, CONF_POLL_INTERVAL, CONF_PRODUC
                     PLATFORM_NAMES)
 
 NEW_PRODUCT = "__new__"
+SEARCH_AGAIN = "__search__"
+ALL = "all"
 KEEP_PRODUCT = "__keep__"
 
 LOGIN_SCHEMA = vol.Schema({
@@ -54,6 +56,16 @@ def platform_name(pid: int | None) -> str:
 def is_product_device(d: dict) -> bool:
     """Sandbox devices report product_id == platform_id."""
     return bool(d.get("product_id")) and d.get("product_id") != d.get("platform_id")
+
+
+def filter_devices(devices: list[dict], search: str = "", platform: str = "all",
+                   online_only: bool = False) -> list[dict]:
+    """Devices whose name or ID contains `search` (any case), on `platform` ("all" or an id)."""
+    q = (search or "").strip().lower()
+    return [d for d in devices
+            if (platform in ("", "all") or str(d.get("platform_id")) == str(platform))
+            and (not online_only or d.get("online"))
+            and (not q or q in (d.get("name") or "").lower() or q in d["id"].lower())]
 
 
 def compatible(product: dict, device: dict) -> bool:
@@ -134,6 +146,7 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
         self._device: dict | None = None
         self._product: dict | None = None
         self._current: dict | None = None  # product the device is in now, if any
+        self._filter: dict = {"platform": ALL, "search": "", "online": False}
 
     # --- entry points ------------------------------------------------------------
 
@@ -167,12 +180,44 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
                                  {"id": pid, "name": entry.data.get(CONF_PRODUCT_NAME, str(pid)),
                                   "slug": entry.data.get(CONF_PRODUCT_SLUG)})
             return await self._finish()
-        return await self.async_step_device()
+        return await self.async_step_find()
 
     # --- device and product ----------------------------------------------------------
 
-    async def async_step_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_find(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Narrow the account's devices down: platform, name/ID search, online only."""
+        errors: dict[str, str] = {}
         if user_input is not None:
+            self._filter = {"platform": user_input.get("platform", ALL),
+                            "search": (user_input.get("search") or "").strip(),
+                            "online": bool(user_input.get("online"))}
+            if self._matches():
+                return await self.async_step_device()
+            errors["base"] = "no_match"
+        counts: dict[int, int] = {}
+        for d in self._devices:
+            counts[d.get("platform_id")] = counts.get(d.get("platform_id"), 0) + 1
+        opts = [SelectOptionDict(value=ALL, label=f"All platforms ({len(self._devices)})")]
+        opts += [SelectOptionDict(value=str(pid), label=f"{platform_name(pid)} ({n})")
+                 for pid, n in sorted(counts.items(), key=lambda kv: (-kv[1], platform_name(kv[0])))]
+        f = self._filter
+        schema = vol.Schema({
+            vol.Required("platform", default=f["platform"]): SelectSelector(
+                SelectSelectorConfig(options=opts, mode=SelectSelectorMode.DROPDOWN)),
+            vol.Optional("search", default=f["search"]): str,
+            vol.Optional("online", default=f["online"]): bool,
+        })
+        return self.async_show_form(step_id="find", data_schema=schema, errors=errors,
+                                    description_placeholders={"count": str(len(self._devices))})
+
+    def _matches(self) -> list[dict]:
+        return filter_devices(self._devices, self._filter["search"],
+                              self._filter["platform"], self._filter["online"])
+
+    async def async_step_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None and "device" in user_input:
+            if user_input["device"] == SEARCH_AGAIN:
+                return await self.async_step_find()
             self._device = next(d for d in self._devices if d["id"] == user_input["device"])
             if is_product_device(self._device):
                 pid = self._device["product_id"]
@@ -184,17 +229,20 @@ class ParticleConfigFlow(LoginSteps, ConfigFlow, domain=DOMAIN):
                 self._current = None
             return await self.async_step_product()
         return self.async_show_form(step_id="device", data_schema=self._device_schema(),
-                                    description_placeholders={"count": str(len(self._devices))})
+                                    description_placeholders={"count": str(len(self._matches())),
+                                                              "total": str(len(self._devices))})
 
     def _device_schema(self) -> vol.Schema:
         names = {p["id"]: p["name"] for p in self._products}
         opts = []
-        for d in sorted(self._devices, key=lambda d: (not d.get("online"), (d.get("name") or "").lower())):
+        for d in sorted(self._matches(), key=lambda d: (not d.get("online"), (d.get("name") or "").lower())):
             where = (names.get(d.get("product_id"), f"product {d.get('product_id')}")
                      if is_product_device(d) else "sandbox")
             state = "online" if d.get("online") else "offline"
             opts.append(SelectOptionDict(value=d["id"], label=(
-                f"{d.get('name') or d['id']} · {platform_name(d.get('platform_id'))} · {where} · {state}")))
+                f"{d.get('name') or d['id']} · {platform_name(d.get('platform_id'))} · {where} · {state}"
+                f" · …{d['id'][-6:]}")))
+        opts.append(SelectOptionDict(value=SEARCH_AGAIN, label="← Search again"))
         return vol.Schema({vol.Required("device"): SelectSelector(
             SelectSelectorConfig(options=opts, mode=SelectSelectorMode.DROPDOWN))})
 
@@ -338,11 +386,18 @@ class ParticleOptionsFlow(LoginSteps, OptionsFlow):
         return self.async_show_menu(step_id="init", menu_options=menu)
 
     async def async_step_devices(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        search = getattr(self, "_search", "")
         if user_input is not None:
-            return self.async_create_entry(data={
-                **self.config_entry.options,
-                CONF_DEVICES: user_input[CONF_DEVICES],
-                CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL])})
+            new_search = (user_input.get("search") or "").strip()
+            if new_search != search:  # the search changed: show the matching devices, keep the picks
+                self._search = new_search
+                self._picked = user_input.get(CONF_DEVICES, [])
+                self._poll = int(user_input[CONF_POLL_INTERVAL])
+            else:
+                return self.async_create_entry(data={
+                    **self.config_entry.options,
+                    CONF_DEVICES: user_input[CONF_DEVICES],
+                    CONF_POLL_INTERVAL: int(user_input[CONF_POLL_INTERVAL])})
         data = self.config_entry.data
         client = ParticleClient(async_get_clientsession(self.hass), data.get(CONF_ACCESS_TOKEN, ""),
                                 data[CONF_PRODUCT_ID])
@@ -352,19 +407,26 @@ class ParticleOptionsFlow(LoginSteps, OptionsFlow):
             return self.async_abort(reason="invalid_auth")
         except ParticleError:
             return self.async_abort(reason="cannot_connect")
-        selected = self.config_entry.options.get(CONF_DEVICES, [])
+        selected = getattr(self, "_picked", None)
+        if selected is None:
+            selected = self.config_entry.options.get(CONF_DEVICES, [])
+        poll = getattr(self, "_poll", None) or self.config_entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         known = {d["id"] for d in devices}
         devices += [{"id": s, "name": s} for s in selected if s not in known]
+        search = getattr(self, "_search", "")
+        # Matching devices, plus the ones already picked so a search never drops them.
+        shown = [d for d in devices if d["id"] in selected or d in filter_devices(devices, search)]
         opts = [SelectOptionDict(value=d["id"], label=(
-                    f"{d.get('name') or d['id']} ({d['id'][-6:]}, {'online' if d.get('online') else 'offline'})"))
-                for d in sorted(devices, key=lambda d: (not d.get("online"), (d.get("name") or "").lower()))]
+                    f"{d.get('name') or d['id']} (…{d['id'][-6:]}, {'online' if d.get('online') else 'offline'})"))
+                for d in sorted(shown, key=lambda d: (not d.get("online"), (d.get("name") or "").lower()))]
         return self.async_show_form(step_id="devices", data_schema=vol.Schema({
+            vol.Optional("search", default=search): str,
             vol.Required(CONF_DEVICES, default=selected): SelectSelector(
                 SelectSelectorConfig(options=opts, multiple=True)),
-            vol.Required(CONF_POLL_INTERVAL, default=self.config_entry.options.get(
-                CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)): NumberSelector(
+            vol.Required(CONF_POLL_INTERVAL, default=poll): NumberSelector(
                 NumberSelectorConfig(min=30, max=86400, step=1, unit_of_measurement="s")),
-        }), description_placeholders={"product": data.get(CONF_PRODUCT_NAME) or str(data[CONF_PRODUCT_ID])})
+        }), description_placeholders={"product": data.get(CONF_PRODUCT_NAME) or str(data[CONF_PRODUCT_ID]),
+                                      "shown": str(len(shown)), "total": str(len(devices))})
 
     async def async_step_revoke(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self.async_step_login()

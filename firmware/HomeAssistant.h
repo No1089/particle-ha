@@ -36,8 +36,22 @@
 //
 // Particle allows about one publish per second. Everything is queued and sent at that
 // pace (events first), a state is sent again only when it changed, and everything is
-// resent every `refreshSeconds` and when Home Assistant asks (it publishes "hass-sync"
-// whenever its event stream connects), so HA always catches up.
+// resent every `refreshSeconds` (6 h) and when Home Assistant asks (it publishes
+// "hass-sync" whenever its event stream connects), so HA always catches up.
+//
+// DATA OPERATIONS: every publish is one Particle Data Operation, and so is every
+// command HA sends (a function call) and every hass-sync the device receives. The free
+// plan includes 100,000 a month for the whole account (about 3,300 a day across all
+// devices) and, on cellular, 100 MB of data. To stay inside it:
+//   - Sensors are batched: all pending HA.value() readings go out as one `ha/batch`
+//     publish (one operation). Update them together, then let HA.loop() send.
+//   - Publish what changed, at the rate it's useful: a reading every 15 min is 96 a
+//     day; every 10 s would be 8,640 a day, more than the whole account's share.
+//   - Set HA.maxPublishesPerDay to cap a device: publishes are spread out evenly and,
+//     past the cap, states wait (only their latest value is sent) and events queue.
+//   Per device and day, roughly: readings/day + state changes + 4 x entities (refresh)
+//   + reconnects of HA's event stream (each sends one hass-sync, answered with one
+//   publish per entity plus one batch).
 #pragma once
 #include "Particle.h"
 
@@ -58,7 +72,17 @@ class HomeAssistantClass {
 public:
     static const int MAX_VALUES = 16;    // ha/<key> sensors
     static const int MAX_ENTITIES = 20;  // lights, switches, binary sensors, numbers, events, buttons
-    uint32_t refreshSeconds = 15 * 60;
+    uint32_t refreshSeconds = 6 * 3600;  // resend everything this often (HA also asks via hass-sync)
+    uint32_t maxPublishesPerDay = 0;      // 0 = no cap; see DATA OPERATIONS above
+    uint32_t publishCount() const { return published; }  // since boot
+    // True while something still waits to be published (for sleepy devices: keep calling
+    // HA.loop() until this is false, then sleep).
+    bool pending() {
+        if (queued) return true;
+        for (int i = 0; i < entityCount; i++) if (entities[i].dirty || entities[i].sentAt == 0) return true;
+        for (int i = 0; i < valueCount; i++) if (due(values[i]) && (values[i].dirty || values[i].sentAt == 0)) return true;
+        return false;
+    }
 
     // ---- declare (in setup(), before begin()) -----------------------------------------
     // Keys: letters, digits and "_"; they become entity IDs. Names are shown in HA.
@@ -167,6 +191,7 @@ public:
 
     void loop() {
         if (!Particle.connected() || millis() - lastSend < 1050) return;
+        if (!budgetAllows()) return;
         if (queued) {  // events first: they are what someone is waiting for
             QueuedEvent q = eventQueue[eventHead];
             if (publishEntity(*q.e, q.type)) {
@@ -182,13 +207,7 @@ public:
                 return;
             }
         }
-        for (int i = 0; i < valueCount; i++) {
-            Slot &s = values[i];
-            if (s.dirty || s.sentAt == 0 || millis() - s.sentAt > refreshSeconds * 1000UL) {
-                publishValue(s);
-                return;
-            }
-        }
+        publishBatch();  // all pending sensor values in one publish
     }
 
 private:
@@ -222,12 +241,32 @@ private:
 
     struct Slot {
         char key[32], val[64], unit[12], dc[24], sc[20], name[32];
-        bool isText, dirty;
+        bool isText, dirty, hasValue;
         uint32_t sentAt;
     };
     Slot values[MAX_VALUES] = {};
     int valueCount = 0;
     uint32_t lastSend = 0;
+    uint32_t published = 0;
+
+    // Daily cap as a token bucket: tokens refill evenly over the day, up to an hour's worth
+    // (at least 4), so a burst after a change still goes out but the day's total holds.
+    float tokens = -1;
+    uint32_t tokensAt = 0;
+    bool budgetAllows() {
+        if (!maxPublishesPerDay) return true;
+        float cap = maxPublishesPerDay / 24.0f < 4 ? 4 : maxPublishesPerDay / 24.0f;
+        uint32_t now = millis();
+        if (tokens < 0) tokens = cap;
+        tokens += (now - tokensAt) / 1000.0f * maxPublishesPerDay / 86400.0f;
+        tokensAt = now;
+        if (tokens > cap) tokens = cap;
+        return tokens >= 1;
+    }
+    void spent() {
+        published++;
+        if (maxPublishesPerDay) tokens -= 1;
+    }
 
     Entity *add(Kind kind, const char *key, const char *name) {
         if (entityCount >= MAX_ENTITIES || find(kind, key)) return nullptr;
@@ -394,6 +433,7 @@ private:
         char ev[64];
         snprintf(ev, sizeof(ev), "ha/%s/%s", kindName(e.kind), e.key);
         lastSend = millis();
+        spent();
         if (!Particle.publish(ev, json, PRIVATE)) return false;
         if (!type) {
             e.dirty = false;
@@ -425,25 +465,48 @@ private:
         strlcpy(s->dc, dc ? dc : "", sizeof(s->dc));
         strlcpy(s->sc, sc ? sc : "", sizeof(s->sc));
         s->isText = isText;
+        s->hasValue = true;
     }
-    void publishValue(Slot &s) {
-        char json[256];
+    bool due(const Slot &s) {
+        if (!s.hasValue) return false;  // named with HA.name() but not measured yet
+        return s.dirty || s.sentAt == 0 || millis() - s.sentAt > refreshSeconds * 1000UL;
+    }
+    // {"temperature": {"v": 21.4, "u": "°C", ...}, "humidity": {...}} as `ha/batch`.
+    void publishBatch() {
+        char json[1024];
         JSONBufferWriter w(json, sizeof(json) - 1);
+        bool any = false;
+        bool included[MAX_VALUES] = {};
         w.beginObject();
-        if (s.isText) w.name("v").value(s.val);
-        else w.name("v").value(atof(s.val), decimalsOf(s.val));
-        if (s.unit[0]) w.name("u").value(s.unit);
-        if (s.dc[0]) w.name("dc").value(s.dc);
-        if (s.sc[0]) w.name("sc").value(s.sc);
-        if (s.name[0]) w.name("n").value(s.name);
+        for (int i = 0; i < valueCount; i++) {
+            Slot &s = values[i];
+            if (!due(s)) continue;
+            // ~ upper bound for this entry; keep the event under Particle's 1024-byte limit
+            size_t need = strlen(s.key) + strlen(s.val) + strlen(s.unit) + strlen(s.dc) + strlen(s.sc) +
+                          strlen(s.name) + 48;
+            if (any && w.dataSize() + need > sizeof(json) - 8) break;  // the rest goes next time
+            w.name(s.key).beginObject();
+            if (s.isText) w.name("v").value(s.val);
+            else w.name("v").value(atof(s.val), decimalsOf(s.val));
+            if (s.unit[0]) w.name("u").value(s.unit);
+            if (s.dc[0]) w.name("dc").value(s.dc);
+            if (s.sc[0]) w.name("sc").value(s.sc);
+            if (s.name[0]) w.name("n").value(s.name);
+            w.endObject();
+            included[i] = true;
+            any = true;
+        }
         w.endObject();
+        if (!any) return;
         json[std::min(w.dataSize(), sizeof(json) - 1)] = 0;
-        char ev[64];
-        snprintf(ev, sizeof(ev), "ha/%s", s.key);
         lastSend = millis();
-        if (Particle.publish(ev, json, PRIVATE)) {
-            s.dirty = false;
-            s.sentAt = millis() ? millis() : 1;
+        spent();
+        if (Particle.publish("ha/batch", json, PRIVATE)) {
+            for (int i = 0; i < valueCount; i++) {
+                if (!included[i]) continue;
+                values[i].dirty = false;
+                values[i].sentAt = millis() ? millis() : 1;
+            }
         }
     }
 };

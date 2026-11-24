@@ -1,6 +1,6 @@
 // Temperature and humidity in Home Assistant from an SHT40/41/45 on I2C (SDA/SCL).
 // Any Particle device. Three sensors (temperature, humidity, dew point) and a number to
-// set how often it measures.
+// set how often it measures (default 5 minutes; each measurement is one Data Operation).
 
 #include "Particle.h"
 #include "HomeAssistant.h"
@@ -31,7 +31,8 @@ static float dewPoint(float t, float rh) {  // Magnus formula
 
 void setup() {
     Wire.begin();
-    HA.addNumber("interval", "Measure every", 10, 600, 10, 60, "s", nullptr);
+    // Each measurement is one Data Operation (one ha/batch publish): 5 minutes = 288 a day.
+    HA.addNumber("interval", "Measure every", 60, 3600, 60, 300, "s", nullptr);
     HA.begin();
 }
 

@@ -208,3 +208,25 @@ async def test_old_function_buttons_are_removed(hass):
         assert reg.async_get(old.entity_id) is None
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
+
+
+async def test_batch_sensors_in_one_publish(hass, cloud):
+    await cloud.device_publish("ha/batch", {
+        "temperature": {"v": 12.3, "u": "°C", "dc": "temperature", "sc": "measurement"},
+        "humidity": {"v": 81, "u": "%", "dc": "humidity"},
+        "battery": 76})
+    await flush(hass)
+    assert float(hass.states.get("sensor.desk_temperature").state) == 12.3
+    assert hass.states.get("sensor.desk_humidity").attributes["unit_of_measurement"] == "%"
+    assert float(hass.states.get("sensor.desk_battery").state) == 76
+
+
+async def test_find_filters_devices():
+    from custom_components.particle.config_flow import filter_devices
+    devs = [{"id": "e00fce68aaaa", "name": "Garden", "platform_id": 13, "online": True},
+            {"id": "0a10aced1111", "name": "Snowflake", "platform_id": 32, "online": True},
+            {"id": "0a10aced2222", "name": "spare", "platform_id": 32, "online": False}]
+    assert [d["name"] for d in filter_devices(devs, platform="32")] == ["Snowflake", "spare"]
+    assert [d["name"] for d in filter_devices(devs, search="SNOW")] == ["Snowflake"]
+    assert [d["name"] for d in filter_devices(devs, search="2222")] == ["spare"]
+    assert [d["name"] for d in filter_devices(devs, platform="32", online_only=True)] == ["Snowflake"]
